@@ -1,0 +1,3220 @@
+From 30ff1cf60f99cf28c74645c5353ba9f5e7eb2d4f Mon Sep 17 00:00:00 2001
+From: zhengyunrong <24733573@qq.com>
+Date: Mon, 29 Jul 2019 15:17:07 +0800
+Subject: [PATCH] guo mi solution
+
+---
+ .../org/hyperledger/fabric/sdk/helper/Config.java  |  14 +-
+ .../fabric/sdk/security/CryptoPrimitives.java      | 129 ++++-
+ .../fabric/sdk/security/CryptoSuite.java           |  34 +-
+ .../fabric/sdk/security/CryptoSuiteGuoMi.java      | 573 +++++++++++++++++++++
+ .../sdk/security/HLSDKJCryptoSuiteFactory.java     |   7 +
+ .../fabric/sdk/security/gmhelper/BCECUtil.java     | 442 ++++++++++++++++
+ .../fabric/sdk/security/gmhelper/GMBaseUtil.java   |  12 +
+ .../fabric/sdk/security/gmhelper/SM2Cipher.java    |  55 ++
+ .../sdk/security/gmhelper/SM2KeyExchangeUtil.java  | 113 ++++
+ .../sdk/security/gmhelper/SM2PreprocessSigner.java | 274 ++++++++++
+ .../fabric/sdk/security/gmhelper/SM2Util.java      | 414 +++++++++++++++
+ .../fabric/sdk/security/gmhelper/SM3Util.java      |  38 ++
+ .../fabric/sdk/security/gmhelper/SM4Util.java      | 188 +++++++
+ .../security/gmhelper/cert/CertSNAllocator.java    |   7 +
+ .../sdk/security/gmhelper/cert/CommonUtil.java     |  69 +++
+ .../security/gmhelper/cert/FileSNAllocator.java    |  48 ++
+ .../sdk/security/gmhelper/cert/SM2CertUtil.java    | 170 ++++++
+ .../sdk/security/gmhelper/cert/SM2PfxMaker.java    | 117 +++++
+ .../sdk/security/gmhelper/cert/SM2PrivateKey.java  |  81 +++
+ .../sdk/security/gmhelper/cert/SM2PublicKey.java   |  44 ++
+ .../security/gmhelper/cert/SM2X509CertMaker.java   |  89 ++++
+ .../cert/exception/InvalidX500NameException.java   |  21 +
+ src/main/resources/sn.dat                          |   1 +
+ 23 files changed, 2937 insertions(+), 3 deletions(-)
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/CryptoSuiteGuoMi.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/BCECUtil.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/GMBaseUtil.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2Cipher.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2KeyExchangeUtil.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2PreprocessSigner.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2Util.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM3Util.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM4Util.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/CertSNAllocator.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/CommonUtil.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/FileSNAllocator.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2CertUtil.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PfxMaker.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PrivateKey.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PublicKey.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2X509CertMaker.java
+ create mode 100644 src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/exception/InvalidX500NameException.java
+ create mode 100644 src/main/resources/sn.dat
+
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/helper/Config.java b/src/main/java/org/hyperledger/fabric/sdk/helper/Config.java
+index 1991217..4c72167 100644
+--- a/src/main/java/org/hyperledger/fabric/sdk/helper/Config.java
++++ b/src/main/java/org/hyperledger/fabric/sdk/helper/Config.java
+@@ -71,6 +71,10 @@ public class Config {
+     public static final String CERTIFICATE_FORMAT = "org.hyperledger.fabric.sdk.crypto.certificate_format";
+     public static final String SIGNATURE_ALGORITHM = "org.hyperledger.fabric.sdk.crypto.default_signature_algorithm";
+     /**
++     * Crypto configuration settings for guomi 
++     */
++    public static final String CRYPTO_SUITE = "org.hyperledger.fabric.sdk.crypto.suite";
++    /**
+      * Logging settings
+      **/
+     public static final String MAX_LOG_STRING_LENGTH = "org.hyperledger.fabric.sdk.log.stringlengthmax";
+@@ -159,7 +163,11 @@ public class Config {
+ 
+             defaultProperty(CERTIFICATE_FORMAT, "X.509");
+             defaultProperty(SIGNATURE_ALGORITHM, "SHA256withECDSA");
+-
++            
++            /**
++             * Crypto guomi configuration settings
++             */
++            defaultProperty(CRYPTO_SUITE, "org.hyperledger.fabric.sdk.security.CryptoPrimitives");
+             /**
+              * Connection defaults
+              */
+@@ -492,6 +500,10 @@ public class Config {
+         return getProperty(DEFAULT_CRYPTO_SUITE_FACTORY);
+     }
+ 
++    public String getCryptoSuite() {
++    	return getProperty(CRYPTO_SUITE);
++    }
++    
+     public int maxLogStringLength() {
+         return Integer.parseInt(getProperty(MAX_LOG_STRING_LENGTH));
+     }
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/CryptoPrimitives.java b/src/main/java/org/hyperledger/fabric/sdk/security/CryptoPrimitives.java
+index 7e4055b..ca47897 100755
+--- a/src/main/java/org/hyperledger/fabric/sdk/security/CryptoPrimitives.java
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/CryptoPrimitives.java
+@@ -44,7 +44,19 @@ import java.security.cert.CertificateFactory;
+ import java.security.cert.PKIXParameters;
+ import java.security.cert.X509Certificate;
+ import java.security.interfaces.ECPrivateKey;
++import java.security.interfaces.ECPublicKey;
+ import java.security.spec.ECGenParameterSpec;
++import java.security.Key;
++import java.security.spec.*;
++import java.security.InvalidAlgorithmParameterException;
++import java.security.InvalidKeyException;
++import javax.crypto.IllegalBlockSizeException;
++import javax.crypto.NullCipher;
++import javax.crypto.BadPaddingException;
++import javax.crypto.KeyGenerator;
++import javax.crypto.SecretKey;
++import javax.crypto.Cipher;
++import javax.crypto.spec.SecretKeySpec;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.Collection;
+@@ -112,6 +124,8 @@ public class CryptoPrimitives implements CryptoSuite {
+     private String DEFAULT_SIGNATURE_ALGORITHM = config.getSignatureAlgorithm();
+ 
+     private Map<Integer, String> securityCurveMapping = config.getSecurityCurveMapping();
++    
++    private  Cipher cipher = null;
+ 
+     // Following configuration settings are hardcoded as they don't deal with any interactions with Fabric MSP and BCCSP components
+     // If you wish to make these customizable, follow the logic from setProperties();
+@@ -923,7 +937,7 @@ public class CryptoPrimitives implements CryptoSuite {
+ //     * @see org.hyperledger.fabric.sdk.security.CryptoSuite#setProperties(java.util.Properties)
+ //     */
+ //    @Override
+-    void setProperties(Properties properties) throws CryptoException, InvalidArgumentException {
++    public void setProperties(Properties properties) throws CryptoException, InvalidArgumentException {
+         if (properties == null) {
+             throw new InvalidArgumentException("properties must not be null");
+         }
+@@ -981,5 +995,118 @@ public class CryptoPrimitives implements CryptoSuite {
+ 
+         return content;
+     }
++    
++    /**
++     * generate the key in symmetric encryption
++     */
++    public byte[] generateSymKey() {
++        byte[] key = null;
++        try {
++            Security.addProvider(new BouncyCastleProvider());
++            //生成key
++            KeyGenerator keyGenerator=KeyGenerator.getInstance("AES", "BC");
++            keyGenerator.getProvider();
++            keyGenerator.init(128);      //显示指定密钥长度
++            SecretKey secretKey = keyGenerator.generateKey();
++            key = secretKey.getEncoded();    
++            cipher=Cipher.getInstance("AES/ECB/PKCS5padding");
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        }
++        return key;
++    }
++    
++    /*
++     * encrypt method for symmetric encryption
++     */
++    public byte[] symEncrypt(byte[] key, byte[] data) {
++    	byte[] result = null;
++    	try {
++            Key key2 = new SecretKeySpec(key, "AES");
++            cipher.init(Cipher.ENCRYPT_MODE, key2);
++            result = cipher.doFinal(data);            
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        } 
++    	return result;
++    }
++    
++    /*
++     * decrypt method for symmetric encryption
++     */
++    public byte[] symDecrypt(byte[] key, byte[] data) {
++    	byte[] result = null;
++    	try {
++            Key key2 = new SecretKeySpec(key, "AES");            
++            cipher.init(Cipher.DECRYPT_MODE, key2);
++            result = cipher.doFinal(data);            
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        } 
++    	return result;    	
++    }
+ 
++    /*
++     * encrypt method for asymmetric encryption
++     * 
++     * @param publickey 公钥字符串信息
++     * @param data   待加密内容
++     * @return 加密后byte[]
++     */
++    public byte[] asymEncrypt(ECPublicKey publickey, byte[] data) {
++        byte[] infoBytes = null;
++        try {
++            ECPublicKeySpec publicKeySpec = new ECPublicKeySpec(publickey.getW(), publickey.getParams());
++            Cipher cipher = new NullCipher();
++            cipher.init(Cipher.ENCRYPT_MODE, publickey, publicKeySpec.getParams());
++            
++            infoBytes = cipher.doFinal(data);
++            return infoBytes;
++        } catch (InvalidKeyException e) {
++            e.printStackTrace();
++            throw new RuntimeException("加密公钥非法,请检查");
++        } catch (BadPaddingException e) {
++            e.printStackTrace();
++            throw new RuntimeException("内容数据已损坏");
++        } catch (IllegalBlockSizeException e) {
++            e.printStackTrace();
++            throw new RuntimeException("内容长度非法");
++        } catch (InvalidAlgorithmParameterException e) {
++            e.printStackTrace();
++            throw new RuntimeException("无效的算法参数异常");
++        }
++    }    	
++  
++    /*
++     * decrypt method for asymmetric encryption
++     * @param privatekey 私钥
++     * @param data   待解密内容
++     * @return       解密后byte[]
++     */
++    public byte[] asymDecrypt(ECPrivateKey privatekey, byte[] data) {
++        byte[] infoBytes = null;
++        try {
++            ECPrivateKeySpec privateKeySpec = new ECPrivateKeySpec(privatekey.getS(), privatekey.getParams());
++            Cipher cipher = new NullCipher();
++            cipher.init(Cipher.DECRYPT_MODE, privatekey, privateKeySpec.getParams());
++            infoBytes = cipher.doFinal(data);
++            return infoBytes;
++        } catch (InvalidKeyException e) {
++            e.printStackTrace();
++            throw new RuntimeException("加密公钥非法,请检查");
++        } catch (BadPaddingException e) {
++            e.printStackTrace();
++            throw new RuntimeException("内容数据已损坏");
++        } catch (IllegalBlockSizeException e) {
++            e.printStackTrace();
++            throw new RuntimeException("内容长度非法");
++        } catch (InvalidAlgorithmParameterException e) {
++            e.printStackTrace();
++            throw new RuntimeException("无效的算法参数异常");    	
++        }
++    }
++    
+ }
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/CryptoSuite.java b/src/main/java/org/hyperledger/fabric/sdk/security/CryptoSuite.java
+index bad2151..77c3b75 100644
+--- a/src/main/java/org/hyperledger/fabric/sdk/security/CryptoSuite.java
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/CryptoSuite.java
+@@ -17,6 +17,8 @@ import java.lang.reflect.InvocationTargetException;
+ import java.security.KeyPair;
+ import java.security.PrivateKey;
+ import java.security.cert.Certificate;
++import java.security.interfaces.ECPrivateKey;
++import java.security.interfaces.ECPublicKey;
+ import java.util.Collection;
+ import java.util.Properties;
+ 
+@@ -27,6 +29,10 @@ import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
+  * All packages for PKI key creation/signing/verification implement this interface
+  */
+ public interface CryptoSuite {
++	
++	void init() throws CryptoException, InvalidArgumentException ;
++	
++	void setProperties(Properties properties) throws CryptoException, InvalidArgumentException;
+ 
+     /**
+      * Get Crypto Suite Factory for this implementation.
+@@ -113,11 +119,37 @@ public interface CryptoSuite {
+      * @throws CryptoException
+      */
+     Certificate bytesToCertificate(byte[] certBytes) throws CryptoException;
+-
++    
++    /**
++     * generate the key in symmetric encryption
++     */
++    byte[] generateSymKey();
++    
++    /*
++     * encrypt method for symmetric encryption
++     */
++    byte[] symEncrypt(byte[] key, byte[] data);
++    
++    /*
++     * decrypt method for symmetric encryption
++     */
++    byte[] symDecrypt(byte[] key, byte[] data);
++    
++    /*
++     * encrypt method for asymmetric encryption
++     */
++    byte[] asymEncrypt(ECPublicKey publickey, byte[] data);
++    
++    /*
++     * decrypt method for asymmetric encryption
++     */
++    byte[] asymDecrypt(ECPrivateKey privatekey, byte[] data);
+     /**
+      * The CryptoSuite factory. Currently {@link #getCryptoSuite} will always
+      * give you a {@link CryptoPrimitives} object
+      */
++    
++    
+ 
+     class Factory {
+         private Factory() {
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/CryptoSuiteGuoMi.java b/src/main/java/org/hyperledger/fabric/sdk/security/CryptoSuiteGuoMi.java
+new file mode 100644
+index 0000000..9811633
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/CryptoSuiteGuoMi.java
+@@ -0,0 +1,573 @@
++package org.hyperledger.fabric.sdk.security;
++
++import static java.lang.String.format;
++
++import java.io.BufferedInputStream;
++import java.io.ByteArrayInputStream;
++import java.io.File;
++import java.io.IOException;
++import java.security.InvalidKeyException;
++import java.security.Key;
++import java.security.KeyPair;
++import java.security.KeyStore;
++import java.security.KeyStoreException;
++import java.security.NoSuchAlgorithmException;
++import java.security.PrivateKey;
++import java.security.Provider;
++import java.security.Security;
++import java.security.Signature;
++import java.security.SignatureException;
++import java.security.cert.Certificate;
++import java.security.cert.CertificateException;
++import java.security.cert.CertificateFactory;
++import java.security.cert.X509Certificate;
++import java.security.interfaces.ECPrivateKey;
++import java.security.interfaces.ECPublicKey;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.Collection;
++import java.util.LinkedList;
++import java.util.List;
++import java.util.Optional;
++import java.util.Properties;
++import java.util.concurrent.atomic.AtomicBoolean;
++
++import javax.crypto.Cipher;
++import javax.crypto.KeyGenerator;
++import javax.crypto.SecretKey;
++import javax.crypto.spec.SecretKeySpec;
++import javax.xml.bind.DatatypeConverter;
++
++import org.apache.commons.io.FileUtils;
++import org.apache.commons.logging.Log;
++import org.apache.commons.logging.LogFactory;
++import org.bouncycastle.crypto.Digest;
++import org.bouncycastle.crypto.digests.SHA256Digest;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey;
++import org.bouncycastle.jce.provider.BouncyCastleProvider;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey;
++import org.hyperledger.fabric.sdk.exception.CryptoException;
++import org.hyperledger.fabric.sdk.exception.InvalidArgumentException;
++
++import org.hyperledger.fabric.sdk.helper.Config;
++import org.hyperledger.fabric.sdk.helper.DiagnosticFileDumper;
++import org.hyperledger.fabric.sdk.helper.Utils;
++import org.hyperledger.fabric.sdk.security.gmhelper.*;
++import org.hyperledger.fabric.sdk.security.gmhelper.cert.SM2CertUtil;
++
++import io.netty.util.internal.ConcurrentSet;
++
++
++public class CryptoSuiteGuoMi implements CryptoSuite {
++    private static final Log logger = LogFactory.getLog(CryptoPrimitives.class);
++    private static final Config config = Config.getConfig();
++    private static final boolean IS_TRACE_LEVEL = logger.isTraceEnabled();
++
++    private static final DiagnosticFileDumper diagnosticFileDumper = IS_TRACE_LEVEL
++            ? config.getDiagnosticFileDumper() : null;
++            
++    private CertificateFactory cf;
++    private Provider SECURITY_PROVIDER;
++    private String CERTIFICATE_FORMAT = config.getCertificateFormat();
++    
++    private final AtomicBoolean inited = new AtomicBoolean(false);    
++	@Override
++	public void init() throws CryptoException, InvalidArgumentException {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function init");
++        if (inited.getAndSet(true)) {
++            throw new InvalidArgumentException("Crypto suite already initialized");
++        } else {
++            resetConfiguration();
++        }
++	}
++
++	@Override
++	public void setProperties(Properties properties) throws CryptoException, InvalidArgumentException {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function setProperties");
++        final String providerName = properties.containsKey(Config.SECURITY_PROVIDER_CLASS_NAME) ?
++                properties.getProperty(Config.SECURITY_PROVIDER_CLASS_NAME) :
++                config.getSecurityProviderClassName();
++
++        try {
++            SECURITY_PROVIDER = setUpExplicitProvider(providerName);
++        } catch (Exception e) {
++            throw new InvalidArgumentException(format("Getting provider for class name: %s", providerName), e);
++
++        }
++        CERTIFICATE_FORMAT = Optional.ofNullable(properties.getProperty(Config.CERTIFICATE_FORMAT)).orElse(CERTIFICATE_FORMAT);
++        
++        resetConfiguration();
++	}
++
++	@Override
++	public CryptoSuiteFactory getCryptoSuiteFactory() {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function CryptoSuiteFactory");
++		return HLSDKJCryptoSuiteFactory.instance(); //Factory for this crypto suite.
++	}
++
++	@Override
++	public Properties getProperties() {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function Properties");
++		return null;
++	}
++
++	@Override
++	public void loadCACertificates(Collection<Certificate> certificates) throws CryptoException {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function loadCACertificates");
++        if (certificates == null || certificates.size() == 0) {
++            throw new CryptoException("Unable to load CA certificates. List is empty");
++        }
++
++        try {
++            for (Certificate cert : certificates) {
++
++                addCACertificateToTrustStore(cert);
++            }
++        } catch (InvalidArgumentException e) {
++            // Note: This can currently never happen (as cert<>null and alias<>null)
++            throw new CryptoException("Unable to add certificate to trust store. Error: " + e.getMessage(), e);
++        }		
++	}
++
++	@Override
++	public void loadCACertificatesAsBytes(Collection<byte[]> certificatesBytes) throws CryptoException {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function loadCACertificatesAsBytes");
++        if (certificatesBytes == null || certificatesBytes.size() == 0) {
++            throw new CryptoException("List of CA certificates is empty. Nothing to load.");
++        }
++
++        ArrayList<Certificate> certList = new ArrayList<>();
++        for (byte[] certBytes : certificatesBytes) {
++            certList.add(bytesToCertificate(certBytes));
++        }
++        loadCACertificates(certList);		
++	}
++
++	@Override
++	public KeyPair keyGen() throws CryptoException {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function keyGen");
++		try {
++			return SM2Util.generateKeyPair();
++		} catch (Exception exp) {
++            throw new CryptoException("Unable to generate key pair", exp);
++        }        
++	}
++/*
++	private byte[] sha256(byte[] input) {
++		// TODO Auto-generated method stubtoS
++	
++        Digest digest =  new SHA256Digest();
++        byte[] retValue = new byte[digest.getDigestSize()];
++        digest.update(input, 0, input.length);
++        digest.doFinal(retValue, 0);
++        return retValue;		
++
++	}	
++*/	
++	@Override
++	public byte[] sign(PrivateKey key, byte[] plainText) throws CryptoException {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function sign input is " + new String(Utils.toHexString(plainText)));
++//		System.out.println("in  CryptoSuiteGuoMi function sign input hash is " + new String(Utils.toHexString(SM3Util.hash(plainText))));
++//		System.out.println("in  CryptoSuiteGuoMi function sign input sha256 is " + new String(Utils.toHexString(sha256(plainText))));
++		try {
++			
++			byte[] sign = SM2Util.sign((BCECPrivateKey)key, plainText);
++//			System.out.println("in  CryptoSuiteGuoMi function sign output is " + new String(Utils.toHexString(sign)));
++			
++			
++			return sign;	
++		} catch (Exception exp) {
++            throw new CryptoException("Unable to sign", exp);
++        }		
++	}
++
++	@Override
++	/*
++	 * signatureAlgorithm , now does not need it
++	 */
++	public boolean verify(byte[] pemCertificate, String signatureAlgorithm, byte[] signature, byte[] plainText)
++			throws CryptoException {
++//		System.out.println("in  CryptoSuiteGuoMi function verify input plainText is " + new String(Utils.toHexString(plainText)));
++        if (plainText == null || signature == null || pemCertificate == null) {
++            return false;
++        }
++
++        if (config.extraLogLevel(10)) {
++            if (null != diagnosticFileDumper) {
++                StringBuilder sb = new StringBuilder(10000);
++                sb.append("plaintext in hex: ")
++                        .append(DatatypeConverter.printHexBinary(plainText))
++                        .append("\n")
++                        .append("signature in hex: " + DatatypeConverter.printHexBinary(signature))
++                        .append("\n")
++                        .append("PEM cert in hex: " + DatatypeConverter.printHexBinary(pemCertificate));
++                logger.trace("verify :  " +
++                        diagnosticFileDumper.createDiagnosticFile(sb.toString()));
++            }
++        }
++        
++        try {
++
++            //  may be  try to use it from CryptoPrimitives is better. X509Certificate certificate = getX509Certificate(pemCertificate);
++        	X509Certificate certificate = SM2CertUtil.getX509Certificate(pemCertificate);
++        	BCECPublicKey pubKey = SM2CertUtil.getBCECPublicKey(certificate);
++        	/*
++        	 * maybe can get BCECPublicKey pubKey as below,
++        	 * BCECUtil.convertX509ToECPublicKey(pemCertificate);
++        	 */
++        	return SM2Util.verify(pubKey, plainText, signature);
++        
++        } catch (Exception exp) {
++        	CryptoException ex = new CryptoException("Cannot verify. Error is: " + exp.getMessage(), exp);
++        	logger.error(ex.getMessage(), ex);
++        	throw ex;
++        }
++       
++	}
++
++	@Override
++	public byte[] hash(byte[] input) {
++		// TODO Auto-generated method stubtoS
++//		System.out.println("in  CryptoSuiteGuoMi function hash");		
++		return SM3Util.hash(input);
++/*		
++        Digest digest =  new SHA256Digest();
++        byte[] retValue = new byte[digest.getDigestSize()];
++        digest.update(input, 0, input.length);
++        digest.doFinal(retValue, 0);
++        return retValue;		
++*/
++	}
++
++	@Override
++	public String generateCertificationRequest(String user, KeyPair keypair) throws InvalidArgumentException {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function generateCertificationRequest");
++		return null;
++	}
++
++	@Override
++	public Certificate bytesToCertificate(byte[] certBytes) throws CryptoException {
++		// TODO Auto-generated method stub
++//		System.out.println("in  CryptoSuiteGuoMi function bytesToCertificate");
++        if (certBytes == null || certBytes.length == 0) {
++            throw new CryptoException("bytesToCertificate: input null or zero length");
++        }
++
++        return getX509Certificate(certBytes);
++	}
++
++    /**
++     * Return X509Certificate  from pem bytes.
++     * So you may ask why this ?  Well some providers (BC) seems to have problems with creating the
++     * X509 cert from bytes so here we go through all available providers till one can convert. :)
++     *
++     * @param pemCertificate
++     * @return
++     */
++
++    private X509Certificate getX509Certificate(byte[] pemCertificate) throws CryptoException {
++        X509Certificate ret = null;
++        CryptoException rete = null;
++
++        List<Provider> providerList = new LinkedList<>(Arrays.asList(Security.getProviders()));
++        if (SECURITY_PROVIDER != null) { //Add if overridden
++            providerList.add(SECURITY_PROVIDER);
++        }
++        try {
++            providerList.add(BouncyCastleProvider.class.newInstance()); // bouncy castle is there always.
++        } catch (Exception e) {
++            logger.warn(e);
++
++        }
++        for (Provider provider : providerList) {
++            try {
++                if (null == provider) {
++                    continue;
++                }
++                CertificateFactory certFactory = CertificateFactory.getInstance(CERTIFICATE_FORMAT, provider);
++                if (null != certFactory) {
++                    try (ByteArrayInputStream bis = new ByteArrayInputStream(pemCertificate)) {
++                        Certificate certificate = certFactory.generateCertificate(bis);
++
++                        if (certificate instanceof X509Certificate) {
++                            ret = (X509Certificate) certificate;
++                            rete = null;
++                            break;
++                        }
++                    }
++
++                }
++            } catch (Exception e) {
++
++                rete = new CryptoException(e.getMessage(), e);
++
++            }
++
++        }
++
++        if (null != rete) {
++
++            throw rete;
++
++        }
++
++        if (ret == null) {
++
++            logger.error("Could not convert pem bytes");
++
++        }
++
++        return ret;
++
++    }
++    
++    private void addCACertificateToTrustStore(Certificate certificate) throws InvalidArgumentException, CryptoException {
++
++        String alias;
++        if (certificate instanceof X509Certificate) {
++            alias = ((X509Certificate) certificate).getSerialNumber().toString();
++        } else { // not likely ...
++            alias = Integer.toString(certificate.hashCode());
++        }
++        addCACertificateToTrustStore(certificate, alias);
++    }	
++	
++    /**
++     * addCACertificateToTrustStore adds a CA cert to the set of certificates used for signature validation
++     *
++     * @param caCertPem an X.509 certificate in PEM format
++     * @param alias     an alias associated with the certificate. Used as shorthand for the certificate during crypto operations
++     * @throws CryptoException
++     * @throws InvalidArgumentException
++     */	
++    public void addCACertificateToTrustStore(File caCertPem, String alias) throws CryptoException, InvalidArgumentException {
++
++        if (caCertPem == null) {
++            throw new InvalidArgumentException("The certificate cannot be null");
++        }
++
++        if (alias == null || alias.isEmpty()) {
++            throw new InvalidArgumentException("You must assign an alias to a certificate when adding to the trust store");
++        }
++
++        try {
++            try (BufferedInputStream bis = new BufferedInputStream(new ByteArrayInputStream(FileUtils.readFileToByteArray(caCertPem)))) {
++
++                Certificate caCert = cf.generateCertificate(bis);
++                addCACertificateToTrustStore(caCert, alias);
++            }
++        } catch (CertificateException | IOException e) {
++            throw new CryptoException("Unable to add CA certificate to trust store. Error: " + e.getMessage(), e);
++        }
++
++    }	
++    
++    ConcurrentSet<String> certificateSet = new ConcurrentSet<>();
++    /**
++     * addCACertificateToTrustStore adds a CA cert to the set of certificates used for signature validation
++     *
++     * @param caCert an X.509 certificate
++     * @param alias  an alias associated with the certificate. Used as shorthand for the certificate during crypto operations
++     * @throws CryptoException
++     * @throws InvalidArgumentException
++     */
++    void addCACertificateToTrustStore(Certificate caCert, String alias) throws InvalidArgumentException, CryptoException {
++
++        if (alias == null || alias.isEmpty()) {
++            throw new InvalidArgumentException("You must assign an alias to a certificate when adding to the trust store.");
++        }
++
++        if (caCert == null) {
++            throw new InvalidArgumentException("Certificate cannot be null.");
++        }
++
++        try {
++            if (config.extraLogLevel(10)) {
++                if (null != diagnosticFileDumper) {
++                    logger.trace(format("Adding cert to trust store. alias: %s. certificate:", alias) + diagnosticFileDumper.createDiagnosticFile(alias + "cert: " + caCert.toString()));
++                }
++            }
++            synchronized (certificateSet) {
++                if (certificateSet.contains(alias)) {
++                    return;
++                }
++
++                getTrustStore().setCertificateEntry(alias, caCert);
++                certificateSet.add(alias);
++
++            }
++        } catch (KeyStoreException e) {
++            String emsg = "Unable to add CA certificate to trust store. Error: " + e.getMessage();
++            logger.error(emsg, e);
++            throw new CryptoException(emsg, e);
++        }
++    }
++    
++    private KeyStore trustStore = null;
++
++    private void createTrustStore() throws CryptoException {
++        try {
++            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
++            keyStore.load(null, null);
++            setTrustStore(keyStore);
++        } catch (KeyStoreException | NoSuchAlgorithmException | CertificateException | IOException | InvalidArgumentException e) {
++            throw new CryptoException("Cannot create trust store. Error: " + e.getMessage(), e);
++        }
++    }
++
++    /**
++     * setTrustStore uses the given KeyStore object as the container for trusted
++     * certificates
++     *
++     * @param keyStore the KeyStore which will be used to hold trusted certificates
++     * @throws InvalidArgumentException
++     */
++    private void setTrustStore(KeyStore keyStore) throws InvalidArgumentException {
++
++        if (keyStore == null) {
++            throw new InvalidArgumentException("Need to specify a java.security.KeyStore input parameter");
++        }
++
++        trustStore = keyStore;
++    }
++
++    /**
++     * getTrustStore returns the KeyStore object where we keep trusted certificates.
++     * If no trust store has been set, this method will create one.
++     *
++     * @return the trust store as a java.security.KeyStore object
++     * @throws CryptoException
++     * @see KeyStore
++     */
++    public KeyStore getTrustStore() throws CryptoException {
++        if (trustStore == null) {
++            createTrustStore();
++        }
++        return trustStore;
++    }
++    
++    /**
++     * Resets curve name, hash algorithm and cert factory. Call this method when a config value changes
++     *
++     * @throws CryptoException
++     * @throws InvalidArgumentException
++     */
++    private void resetConfiguration() throws CryptoException, InvalidArgumentException {
++
++//        setSecurityLevel(securityLevel);
++
++//        setHashAlgorithm(hashAlgorithm);
++
++        try {
++            cf = CertificateFactory.getInstance(CERTIFICATE_FORMAT);
++        } catch (CertificateException e) {
++            CryptoException ex = new CryptoException("Cannot initialize " + CERTIFICATE_FORMAT + " certificate factory. Error = " + e.getMessage(), e);
++            logger.error(ex.getMessage(), ex);
++            throw ex;
++        }
++    }    
++    
++    Provider setUpExplicitProvider(String securityProviderClassName) throws InstantiationException, ClassNotFoundException, IllegalAccessException {
++        if (null == securityProviderClassName) {
++            throw new InstantiationException(format("Security provider class name property (%s) set to null  ", Config.SECURITY_PROVIDER_CLASS_NAME));
++        }
++
++        if (CryptoSuiteFactory.DEFAULT_JDK_PROVIDER.equals(securityProviderClassName)) {
++            return null;
++        }
++
++        Class<?> aClass = Class.forName(securityProviderClassName);
++        if (null == aClass) {
++            throw new InstantiationException(format("Getting class for security provider %s returned null  ", securityProviderClassName));
++        }
++        if (!Provider.class.isAssignableFrom(aClass)) {
++            throw new InstantiationException(format("Class for security provider %s is not a Java security provider", aClass.getName()));
++        }
++        Provider securityProvider = (Provider) aClass.newInstance();
++        if (securityProvider == null) {
++            throw new InstantiationException(format("Creating instance of security %s returned null  ", aClass.getName()));
++        }
++        return securityProvider;
++    }
++   
++    /**
++     * generate the key in symmetric encryption
++     */
++    public byte[] generateSymKey() {
++        byte[] key = null;
++        try {
++        	key = SM4Util.generateKey();
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        }
++        return key;   
++    }
++    
++    /*
++     * encrypt method for symmetric encryption
++     */
++    public byte[] symEncrypt(byte[] key, byte[] data) {
++    	byte[] result = null;
++    	try {
++    		result = SM4Util.encrypt_Ecb_Padding(key, data);            
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        } 
++    	return result;
++    } 
++    
++    /*
++     * decrypt method for symmetric encryption
++     */
++    public byte[] symDecrypt(byte[] key, byte[] data) {
++    	byte[] result = null;
++    	try {
++    		result = SM4Util.decrypt_Ecb_Padding(key, data);           
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        } 
++    	return result;	
++    }  
++    
++    /*
++     * encrypt method for asymmetric encryption
++     */
++    public byte[] asymEncrypt(ECPublicKey publickey, byte[] data) {
++    	byte[] result = null;
++    	try {
++    		result = SM2Util.encrypt((BCECPublicKey)publickey, data);
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        } 
++    	return result;
++    }
++    
++    /*
++     * decrypt method for asymmetric encryption
++     */
++    public byte[] asymDecrypt(ECPrivateKey privatekey, byte[] data) {
++    	byte[] result = null;
++    	try {
++    		result = SM2Util.decrypt((BCECPrivateKey)privatekey, data);           
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        } 
++    	return result;	   	
++    }
++}
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/HLSDKJCryptoSuiteFactory.java b/src/main/java/org/hyperledger/fabric/sdk/security/HLSDKJCryptoSuiteFactory.java
+index 5008292..e0f47f6 100644
+--- a/src/main/java/org/hyperledger/fabric/sdk/security/HLSDKJCryptoSuiteFactory.java
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/HLSDKJCryptoSuiteFactory.java
+@@ -44,7 +44,14 @@ public class HLSDKJCryptoSuiteFactory implements CryptoSuiteFactory {
+         CryptoSuite ret = cache.get(properties);
+         if (ret == null) {
+             try {
++            	/*
+                 CryptoPrimitives cp = new CryptoPrimitives();
++                */
++                
++                Class<?> aClass = Class.forName(config.getCryptoSuite());
++                CryptoSuite cp = (CryptoSuite)aClass.newInstance();
++                                
++
+                 cp.setProperties(properties);
+                 cp.init();
+                 ret = cp;
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/BCECUtil.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/BCECUtil.java
+new file mode 100644
+index 0000000..0552102
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/BCECUtil.java
+@@ -0,0 +1,442 @@
++package org.hyperledger.fabric.sdk.security.gmhelper;
++
++import org.bouncycastle.asn1.ASN1Encodable;
++import org.bouncycastle.asn1.ASN1EncodableVector;
++import org.bouncycastle.asn1.ASN1Encoding;
++import org.bouncycastle.asn1.ASN1Integer;
++import org.bouncycastle.asn1.ASN1ObjectIdentifier;
++import org.bouncycastle.asn1.ASN1OctetString;
++import org.bouncycastle.asn1.ASN1Primitive;
++import org.bouncycastle.asn1.DERNull;
++import org.bouncycastle.asn1.DEROctetString;
++import org.bouncycastle.asn1.DERSequence;
++import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
++import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
++import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
++import org.bouncycastle.asn1.x9.X962Parameters;
++import org.bouncycastle.asn1.x9.X9ECParameters;
++import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
++import org.bouncycastle.crypto.AsymmetricCipherKeyPair;
++import org.bouncycastle.crypto.generators.ECKeyPairGenerator;
++import org.bouncycastle.crypto.params.ECDomainParameters;
++import org.bouncycastle.crypto.params.ECKeyGenerationParameters;
++import org.bouncycastle.crypto.params.ECKeyParameters;
++import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
++import org.bouncycastle.crypto.params.ECPublicKeyParameters;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey;
++import org.bouncycastle.jcajce.provider.asymmetric.util.EC5Util;
++import org.bouncycastle.jcajce.provider.asymmetric.util.ECUtil;
++import org.bouncycastle.jce.provider.BouncyCastleProvider;
++import org.bouncycastle.jce.spec.ECNamedCurveSpec;
++import org.bouncycastle.jce.spec.ECParameterSpec;
++import org.bouncycastle.math.ec.ECCurve;
++import org.bouncycastle.pqc.math.linearalgebra.ByteUtils;
++import org.bouncycastle.util.io.pem.PemObject;
++import org.bouncycastle.util.io.pem.PemReader;
++import org.bouncycastle.util.io.pem.PemWriter;
++
++import java.io.ByteArrayInputStream;
++import java.io.ByteArrayOutputStream;
++import java.io.IOException;
++import java.io.InputStreamReader;
++import java.io.OutputStreamWriter;
++import java.math.BigInteger;
++import java.security.InvalidAlgorithmParameterException;
++import java.security.KeyFactory;
++import java.security.KeyPair;
++import java.security.KeyPairGenerator;
++import java.security.NoSuchAlgorithmException;
++import java.security.NoSuchProviderException;
++import java.security.SecureRandom;
++import java.security.spec.ECGenParameterSpec;
++import java.security.spec.InvalidKeySpecException;
++import java.security.spec.PKCS8EncodedKeySpec;
++import java.security.spec.X509EncodedKeySpec;
++
++/**
++ * 这个工具类的方法，也适用于其他基于BC库的ECC算法
++ */
++public class BCECUtil {
++    private static final String ALGO_NAME_EC = "EC";
++    private static final String PEM_STRING_PUBLIC = "PUBLIC KEY";
++    private static final String PEM_STRING_ECPRIVATEKEY = "EC PRIVATE KEY";
++
++    /**
++     * 生成ECC密钥对
++     *
++     * @return ECC密钥对
++     */
++    public static AsymmetricCipherKeyPair generateKeyPairParameter(ECDomainParameters domainParameters,
++        SecureRandom random) {
++        ECKeyGenerationParameters keyGenerationParams = new ECKeyGenerationParameters(domainParameters,
++            random);
++        ECKeyPairGenerator keyGen = new ECKeyPairGenerator();
++        keyGen.init(keyGenerationParams);
++        return keyGen.generateKeyPair();
++    }
++
++    public static KeyPair generateKeyPair(ECDomainParameters domainParameters, SecureRandom random)
++        throws NoSuchProviderException, NoSuchAlgorithmException,
++        InvalidAlgorithmParameterException {
++        KeyPairGenerator kpg = KeyPairGenerator.getInstance(ALGO_NAME_EC, BouncyCastleProvider.PROVIDER_NAME);
++        ECParameterSpec parameterSpec = new ECParameterSpec(domainParameters.getCurve(), domainParameters.getG(),
++            domainParameters.getN(), domainParameters.getH());
++        kpg.initialize(parameterSpec, random);
++        return kpg.generateKeyPair();
++    }
++
++    public static int getCurveLength(ECKeyParameters ecKey) {
++        return getCurveLength(ecKey.getParameters());
++    }
++
++    public static int getCurveLength(ECDomainParameters domainParams) {
++        return (domainParams.getCurve().getFieldSize() + 7) / 8;
++    }
++
++    public static byte[] fixToCurveLengthBytes(int curveLength, byte[] src) {
++        if (src.length == curveLength) {
++            return src;
++        }
++
++        byte[] result = new byte[curveLength];
++        if (src.length > curveLength) {
++            System.arraycopy(src, src.length - result.length, result, 0, result.length);
++        } else {
++            System.arraycopy(src, 0, result, result.length - src.length, src.length);
++        }
++        return result;
++    }
++
++    public static ECPrivateKeyParameters createECPrivateKeyParameters(BigInteger d,
++        ECDomainParameters domainParameters) {
++        return new ECPrivateKeyParameters(d, domainParameters);
++    }
++
++    public static ECPublicKeyParameters createECPublicKeyParameters(BigInteger x, BigInteger y,
++        ECCurve curve, ECDomainParameters domainParameters) {
++        return createECPublicKeyParameters(x.toByteArray(), y.toByteArray(), curve, domainParameters);
++    }
++
++    public static ECPublicKeyParameters createECPublicKeyParameters(String xHex, String yHex,
++        ECCurve curve, ECDomainParameters domainParameters) {
++        return createECPublicKeyParameters(ByteUtils.fromHexString(xHex), ByteUtils.fromHexString(yHex),
++            curve, domainParameters);
++    }
++
++    public static ECPublicKeyParameters createECPublicKeyParameters(byte[] xBytes, byte[] yBytes,
++        ECCurve curve, ECDomainParameters domainParameters) {
++        final byte uncompressedFlag = 0x04;
++        int curveLength = getCurveLength(domainParameters);
++        xBytes = fixToCurveLengthBytes(curveLength, xBytes);
++        yBytes = fixToCurveLengthBytes(curveLength, yBytes);
++        byte[] encodedPubKey = new byte[1 + xBytes.length + yBytes.length];
++        encodedPubKey[0] = uncompressedFlag;
++        System.arraycopy(xBytes, 0, encodedPubKey, 1, xBytes.length);
++        System.arraycopy(yBytes, 0, encodedPubKey, 1 + xBytes.length, yBytes.length);
++        return new ECPublicKeyParameters(curve.decodePoint(encodedPubKey), domainParameters);
++    }
++
++    public static ECPrivateKeyParameters convertPrivateKeyToParameters(BCECPrivateKey ecPriKey) {
++        ECParameterSpec parameterSpec = ecPriKey.getParameters();
++        ECDomainParameters domainParameters = new ECDomainParameters(parameterSpec.getCurve(), parameterSpec.getG(),
++            parameterSpec.getN(), parameterSpec.getH());
++        return new ECPrivateKeyParameters(ecPriKey.getD(), domainParameters);
++    }
++
++    public static ECPublicKeyParameters convertPublicKeyToParameters(BCECPublicKey ecPubKey) {
++        ECParameterSpec parameterSpec = ecPubKey.getParameters();
++        ECDomainParameters domainParameters = new ECDomainParameters(parameterSpec.getCurve(), parameterSpec.getG(),
++            parameterSpec.getN(), parameterSpec.getH());
++        return new ECPublicKeyParameters(ecPubKey.getQ(), domainParameters);
++    }
++
++    public static BCECPublicKey createPublicKeyFromSubjectPublicKeyInfo(SubjectPublicKeyInfo subPubInfo) throws NoSuchProviderException,
++        NoSuchAlgorithmException, InvalidKeySpecException, IOException {
++        return BCECUtil.convertX509ToECPublicKey(subPubInfo.toASN1Primitive().getEncoded(ASN1Encoding.DER));
++    }
++
++    /**
++     * 将ECC私钥转换为PKCS8标准的字节流
++     *
++     * @param priKey
++     * @param pubKey 可以为空，但是如果为空的话得到的结果OpenSSL可能解析不了
++     * @return
++     */
++    public static byte[] convertECPrivateKeyToPKCS8(ECPrivateKeyParameters priKey,
++        ECPublicKeyParameters pubKey) {
++        ECDomainParameters domainParams = priKey.getParameters();
++        ECParameterSpec spec = new ECParameterSpec(domainParams.getCurve(), domainParams.getG(),
++            domainParams.getN(), domainParams.getH());
++        BCECPublicKey publicKey = null;
++        if (pubKey != null) {
++            publicKey = new BCECPublicKey(ALGO_NAME_EC, pubKey, spec,
++                BouncyCastleProvider.CONFIGURATION);
++        }
++        BCECPrivateKey privateKey = new BCECPrivateKey(ALGO_NAME_EC, priKey, publicKey,
++            spec, BouncyCastleProvider.CONFIGURATION);
++        return privateKey.getEncoded();
++    }
++
++    /**
++     * 将PKCS8标准的私钥字节流转换为私钥对象
++     *
++     * @param pkcs8Key
++     * @return
++     * @throws NoSuchAlgorithmException
++     * @throws NoSuchProviderException
++     * @throws InvalidKeySpecException
++     */
++    public static BCECPrivateKey convertPKCS8ToECPrivateKey(byte[] pkcs8Key)
++        throws NoSuchAlgorithmException, NoSuchProviderException, InvalidKeySpecException {
++        PKCS8EncodedKeySpec peks = new PKCS8EncodedKeySpec(pkcs8Key);
++        KeyFactory kf = KeyFactory.getInstance(ALGO_NAME_EC, BouncyCastleProvider.PROVIDER_NAME);
++        return (BCECPrivateKey) kf.generatePrivate(peks);
++    }
++
++    /**
++     * 将PKCS8标准的私钥字节流转换为PEM
++     *
++     * @param encodedKey
++     * @return
++     * @throws IOException
++     */
++    public static String convertECPrivateKeyPKCS8ToPEM(byte[] encodedKey) throws IOException {
++        return convertEncodedDataToPEM(PEM_STRING_ECPRIVATEKEY, encodedKey);
++    }
++
++    /**
++     * 将PEM格式的私钥转换为PKCS8标准字节流
++     *
++     * @param pemString
++     * @return
++     * @throws IOException
++     */
++    public static byte[] convertECPrivateKeyPEMToPKCS8(String pemString) throws IOException {
++        return convertPEMToEncodedData(pemString);
++    }
++
++    /**
++     * 将ECC私钥转换为SEC1标准的字节流
++     * openssl d2i_ECPrivateKey函数要求的DER编码的私钥也是SEC1标准的，
++     * 这个工具函数的主要目的就是为了能生成一个openssl可以直接“识别”的ECC私钥.
++     * 相对RSA私钥的PKCS1标准，ECC私钥的标准为SEC1
++     *
++     * @param priKey
++     * @param pubKey
++     * @return
++     * @throws IOException
++     */
++    public static byte[] convertECPrivateKeyToSEC1(ECPrivateKeyParameters priKey,
++        ECPublicKeyParameters pubKey) throws IOException {
++        byte[] pkcs8Bytes = convertECPrivateKeyToPKCS8(priKey, pubKey);
++        PrivateKeyInfo pki = PrivateKeyInfo.getInstance(pkcs8Bytes);
++        ASN1Encodable encodable = pki.parsePrivateKey();
++        ASN1Primitive primitive = encodable.toASN1Primitive();
++        byte[] sec1Bytes = primitive.getEncoded();
++        return sec1Bytes;
++    }
++
++    /**
++     * 将SEC1标准的私钥字节流恢复为PKCS8标准的字节流
++     *
++     * @param sec1Key
++     * @return
++     * @throws IOException
++     */
++    public static byte[] convertECPrivateKeySEC1ToPKCS8(byte[] sec1Key) throws IOException {
++        /**
++         * 参考org.bouncycastle.asn1.pkcs.PrivateKeyInfo和
++         * org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey，逆向拼装
++         */
++        X962Parameters params = getDomainParametersFromName(SM2Util.JDK_EC_SPEC, false);
++        ASN1OctetString privKey = new DEROctetString(sec1Key);
++        ASN1EncodableVector v = new ASN1EncodableVector();
++        v.add(new ASN1Integer(0)); //版本号
++        v.add(new AlgorithmIdentifier(X9ObjectIdentifiers.id_ecPublicKey, params)); //算法标识
++        v.add(privKey);
++        DERSequence ds = new DERSequence(v);
++        return ds.getEncoded(ASN1Encoding.DER);
++    }
++
++    /**
++     * 将SEC1标准的私钥字节流转为BCECPrivateKey对象
++     *
++     * @param sec1Key
++     * @return
++     * @throws NoSuchAlgorithmException
++     * @throws NoSuchProviderException
++     * @throws InvalidKeySpecException
++     * @throws IOException
++     */
++    public static BCECPrivateKey convertSEC1ToBCECPrivateKey(byte[] sec1Key)
++        throws NoSuchAlgorithmException, NoSuchProviderException, InvalidKeySpecException, IOException {
++        PKCS8EncodedKeySpec peks = new PKCS8EncodedKeySpec(convertECPrivateKeySEC1ToPKCS8(sec1Key));
++        KeyFactory kf = KeyFactory.getInstance(ALGO_NAME_EC, BouncyCastleProvider.PROVIDER_NAME);
++        return (BCECPrivateKey) kf.generatePrivate(peks);
++    }
++
++    /**
++     * 将SEC1标准的私钥字节流转为ECPrivateKeyParameters对象
++     * openssl i2d_ECPrivateKey函数生成的DER编码的ecc私钥是：SEC1标准的、带有EC_GROUP、带有公钥的，
++     * 这个工具函数的主要目的就是为了使Java程序能够“识别”openssl生成的ECC私钥
++     *
++     * @param sec1Key
++     * @return
++     * @throws NoSuchAlgorithmException
++     * @throws NoSuchProviderException
++     * @throws InvalidKeySpecException
++     */
++    public static ECPrivateKeyParameters convertSEC1ToECPrivateKey(byte[] sec1Key)
++        throws NoSuchAlgorithmException, NoSuchProviderException, InvalidKeySpecException, IOException {
++        BCECPrivateKey privateKey = convertSEC1ToBCECPrivateKey(sec1Key);
++        return convertPrivateKeyToParameters(privateKey);
++    }
++
++    /**
++     * 将ECC公钥对象转换为X509标准的字节流
++     *
++     * @param pubKey
++     * @return
++     */
++    public static byte[] convertECPublicKeyToX509(ECPublicKeyParameters pubKey) {
++        ECDomainParameters domainParams = pubKey.getParameters();
++        ECParameterSpec spec = new ECParameterSpec(domainParams.getCurve(), domainParams.getG(),
++            domainParams.getN(), domainParams.getH());
++        BCECPublicKey publicKey = new BCECPublicKey(ALGO_NAME_EC, pubKey, spec,
++            BouncyCastleProvider.CONFIGURATION);
++        return publicKey.getEncoded();
++    }
++
++    /**
++     * 将X509标准的公钥字节流转为公钥对象
++     *
++     * @param x509Bytes
++     * @return
++     * @throws NoSuchProviderException
++     * @throws NoSuchAlgorithmException
++     * @throws InvalidKeySpecException
++     */
++    public static BCECPublicKey convertX509ToECPublicKey(byte[] x509Bytes) throws NoSuchProviderException,
++        NoSuchAlgorithmException, InvalidKeySpecException {
++        X509EncodedKeySpec eks = new X509EncodedKeySpec(x509Bytes);
++        KeyFactory kf = KeyFactory.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
++        return (BCECPublicKey) kf.generatePublic(eks);
++    }
++
++    /**
++     * 将X509标准的公钥字节流转为PEM
++     *
++     * @param encodedKey
++     * @return
++     * @throws IOException
++     */
++    public static String convertECPublicKeyX509ToPEM(byte[] encodedKey) throws IOException {
++        return convertEncodedDataToPEM(PEM_STRING_PUBLIC, encodedKey);
++    }
++
++    /**
++     * 将PEM格式的公钥转为X509标准的字节流
++     *
++     * @param pemString
++     * @return
++     * @throws IOException
++     */
++    public static byte[] convertECPublicKeyPEMToX509(String pemString) throws IOException {
++        return convertPEMToEncodedData(pemString);
++    }
++
++    /**
++     * copy from BC
++     *
++     * @param genSpec
++     * @return
++     */
++    public static X9ECParameters getDomainParametersFromGenSpec(ECGenParameterSpec genSpec) {
++        return getDomainParametersFromName(genSpec.getName());
++    }
++
++    /**
++     * copy from BC
++     *
++     * @param curveName
++     * @return
++     */
++    public static X9ECParameters getDomainParametersFromName(String curveName) {
++        X9ECParameters domainParameters;
++        try {
++            if (curveName.charAt(0) >= '0' && curveName.charAt(0) <= '2') {
++                ASN1ObjectIdentifier oidID = new ASN1ObjectIdentifier(curveName);
++                domainParameters = ECUtil.getNamedCurveByOid(oidID);
++            } else {
++                if (curveName.indexOf(' ') > 0) {
++                    curveName = curveName.substring(curveName.indexOf(' ') + 1);
++                    domainParameters = ECUtil.getNamedCurveByName(curveName);
++                } else {
++                    domainParameters = ECUtil.getNamedCurveByName(curveName);
++                }
++            }
++        } catch (IllegalArgumentException ex) {
++            domainParameters = ECUtil.getNamedCurveByName(curveName);
++        }
++        return domainParameters;
++    }
++
++    /**
++     * copy from BC
++     *
++     * @param ecSpec
++     * @param withCompression
++     * @return
++     */
++    public static X962Parameters getDomainParametersFromName(java.security.spec.ECParameterSpec ecSpec,
++        boolean withCompression) {
++        X962Parameters params;
++
++        if (ecSpec instanceof ECNamedCurveSpec) {
++            ASN1ObjectIdentifier curveOid = ECUtil.getNamedCurveOid(((ECNamedCurveSpec) ecSpec).getName());
++            if (curveOid == null) {
++                curveOid = new ASN1ObjectIdentifier(((ECNamedCurveSpec) ecSpec).getName());
++            }
++            params = new X962Parameters(curveOid);
++        } else if (ecSpec == null) {
++            params = new X962Parameters(DERNull.INSTANCE);
++        } else {
++            ECCurve curve = EC5Util.convertCurve(ecSpec.getCurve());
++
++            X9ECParameters ecP = new X9ECParameters(
++                curve,
++                EC5Util.convertPoint(curve, ecSpec.getGenerator(), withCompression),
++                ecSpec.getOrder(),
++                BigInteger.valueOf(ecSpec.getCofactor()),
++                ecSpec.getCurve().getSeed());
++
++            params = new X962Parameters(ecP);
++        }
++
++        return params;
++    }
++
++    private static String convertEncodedDataToPEM(String type, byte[] encodedData) throws IOException {
++        ByteArrayOutputStream bOut = new ByteArrayOutputStream();
++        PemWriter pWrt = new PemWriter(new OutputStreamWriter(bOut));
++        try {
++            PemObject pemObj = new PemObject(type, encodedData);
++            pWrt.writeObject(pemObj);
++        } finally {
++            pWrt.close();
++        }
++        return new String(bOut.toByteArray());
++    }
++
++    private static byte[] convertPEMToEncodedData(String pemString) throws IOException {
++        ByteArrayInputStream bIn = new ByteArrayInputStream(pemString.getBytes());
++        PemReader pRdr = new PemReader(new InputStreamReader(bIn));
++        try {
++            PemObject pemObject = pRdr.readPemObject();
++            return pemObject.getContent();
++        } finally {
++            pRdr.close();
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/GMBaseUtil.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/GMBaseUtil.java
+new file mode 100644
+index 0000000..1f827c8
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/GMBaseUtil.java
+@@ -0,0 +1,12 @@
++package org.hyperledger.fabric.sdk.security.gmhelper;
++
++
++import org.bouncycastle.jce.provider.BouncyCastleProvider;
++
++import java.security.Security;
++
++public class GMBaseUtil {
++    static {
++        Security.addProvider(new BouncyCastleProvider());
++    }
++}
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2Cipher.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2Cipher.java
+new file mode 100644
+index 0000000..1285173
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2Cipher.java
+@@ -0,0 +1,55 @@
++package org.hyperledger.fabric.sdk.security.gmhelper;
++
++public class SM2Cipher {
++    /**
++     * ECC密钥
++     */
++    private byte[] c1;
++
++    /**
++     * 真正的密文
++     */
++    private byte[] c2;
++
++    /**
++     * 对（c1+c2）的SM3-HASH值
++     */
++    private byte[] c3;
++
++    /**
++     * SM2标准的密文，即（c1+c2+c3）
++     */
++    private byte[] cipherText;
++
++    public byte[] getC1() {
++        return c1;
++    }
++
++    public void setC1(byte[] c1) {
++        this.c1 = c1;
++    }
++
++    public byte[] getC2() {
++        return c2;
++    }
++
++    public void setC2(byte[] c2) {
++        this.c2 = c2;
++    }
++
++    public byte[] getC3() {
++        return c3;
++    }
++
++    public void setC3(byte[] c3) {
++        this.c3 = c3;
++    }
++
++    public byte[] getCipherText() {
++        return cipherText;
++    }
++
++    public void setCipherText(byte[] cipherText) {
++        this.cipherText = cipherText;
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2KeyExchangeUtil.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2KeyExchangeUtil.java
+new file mode 100644
+index 0000000..1dabdf8
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2KeyExchangeUtil.java
+@@ -0,0 +1,113 @@
++package org.hyperledger.fabric.sdk.security.gmhelper;
++
++import org.bouncycastle.crypto.agreement.SM2KeyExchange;
++import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
++import org.bouncycastle.crypto.params.ECPublicKeyParameters;
++import org.bouncycastle.crypto.params.ParametersWithID;
++import org.bouncycastle.crypto.params.SM2KeyExchangePrivateParameters;
++import org.bouncycastle.crypto.params.SM2KeyExchangePublicParameters;
++
++import java.util.Arrays;
++
++public class SM2KeyExchangeUtil {
++    /**
++     * @param initiator         true表示发起方，false表示响应方
++     * @param keyBits           生成的密钥长度
++     * @param selfStaticPriv    己方固定私钥
++     * @param selfEphemeralPriv 己方临时私钥
++     * @param selfId            己方ID
++     * @param otherStaticPub    对方固定公钥
++     * @param otherEphemeralPub 对方临时公钥
++     * @param otherId           对方ID
++     * @return 返回协商出的密钥，但是这个密钥是没有经过确认的
++     */
++    public static byte[] calculateKey(boolean initiator, int keyBits,
++        ECPrivateKeyParameters selfStaticPriv, ECPrivateKeyParameters selfEphemeralPriv, byte[] selfId,
++        ECPublicKeyParameters otherStaticPub, ECPublicKeyParameters otherEphemeralPub, byte[] otherId) {
++        SM2KeyExchange exch = new SM2KeyExchange();
++        exch.init(new ParametersWithID(
++            new SM2KeyExchangePrivateParameters(initiator, selfStaticPriv, selfEphemeralPriv),
++            selfId));
++        return exch.calculateKey(
++            keyBits,
++            new ParametersWithID(new SM2KeyExchangePublicParameters(otherStaticPub, otherEphemeralPub), otherId));
++    }
++
++    /**
++     * @param initiator         true表示发起方，false表示响应方
++     * @param keyBits           生成的密钥长度
++     * @param confirmationTag   确认信息，如果是响应方可以为null；如果是发起方则应为响应方的s1
++     * @param selfStaticPriv    己方固定私钥
++     * @param selfEphemeralPriv 己方临时私钥
++     * @param selfId            己方ID
++     * @param otherStaticPub    对方固定公钥
++     * @param otherEphemeralPub 对方临时公钥
++     * @param otherId           对方ID
++     * @return
++     */
++    public static ExchangeResult calculateKeyWithConfirmation(boolean initiator, int keyBits, byte[] confirmationTag,
++        ECPrivateKeyParameters selfStaticPriv, ECPrivateKeyParameters selfEphemeralPriv, byte[] selfId,
++        ECPublicKeyParameters otherStaticPub, ECPublicKeyParameters otherEphemeralPub, byte[] otherId) {
++        SM2KeyExchange exch = new SM2KeyExchange();
++        exch.init(new ParametersWithID(
++            new SM2KeyExchangePrivateParameters(initiator, selfStaticPriv, selfEphemeralPriv),
++            selfId));
++        byte[][] result = exch.calculateKeyWithConfirmation(
++            keyBits,
++            confirmationTag,
++            new ParametersWithID(new SM2KeyExchangePublicParameters(otherStaticPub, otherEphemeralPub), otherId));
++        ExchangeResult confirmResult = new ExchangeResult();
++        confirmResult.setKey(result[0]);
++        if (initiator) {
++            confirmResult.setS2(result[1]);
++        } else {
++            confirmResult.setS1(result[1]);
++            confirmResult.setS2(result[2]);
++        }
++        return confirmResult;
++    }
++
++    /**
++     * @param s2
++     * @param confirmationTag 实际上是发起方的s2
++     * @return
++     */
++    public static boolean responderConfirm(byte[] s2, byte[] confirmationTag) {
++        return Arrays.equals(s2, confirmationTag);
++    }
++
++    public static class ExchangeResult {
++        private byte[] key;
++
++        /**
++         * 发起方没有s1
++         */
++        private byte[] s1;
++
++        private byte[] s2;
++
++        public byte[] getKey() {
++            return key;
++        }
++
++        public void setKey(byte[] key) {
++            this.key = key;
++        }
++
++        public byte[] getS1() {
++            return s1;
++        }
++
++        public void setS1(byte[] s1) {
++            this.s1 = s1;
++        }
++
++        public byte[] getS2() {
++            return s2;
++        }
++
++        public void setS2(byte[] s2) {
++            this.s2 = s2;
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2PreprocessSigner.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2PreprocessSigner.java
+new file mode 100644
+index 0000000..26e8dcb
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2PreprocessSigner.java
+@@ -0,0 +1,274 @@
++package org.hyperledger.fabric.sdk.security.gmhelper;
++
++import org.bouncycastle.asn1.ASN1EncodableVector;
++import org.bouncycastle.asn1.ASN1Encoding;
++import org.bouncycastle.asn1.ASN1Integer;
++import org.bouncycastle.asn1.ASN1Primitive;
++import org.bouncycastle.asn1.ASN1Sequence;
++import org.bouncycastle.asn1.DERSequence;
++import org.bouncycastle.crypto.CipherParameters;
++import org.bouncycastle.crypto.CryptoException;
++import org.bouncycastle.crypto.CryptoServicesRegistrar;
++import org.bouncycastle.crypto.Digest;
++import org.bouncycastle.crypto.digests.SM3Digest;
++import org.bouncycastle.crypto.params.ECDomainParameters;
++import org.bouncycastle.crypto.params.ECKeyParameters;
++import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
++import org.bouncycastle.crypto.params.ECPublicKeyParameters;
++import org.bouncycastle.crypto.params.ParametersWithID;
++import org.bouncycastle.crypto.params.ParametersWithRandom;
++import org.bouncycastle.crypto.signers.DSAKCalculator;
++import org.bouncycastle.crypto.signers.RandomDSAKCalculator;
++import org.bouncycastle.math.ec.ECAlgorithms;
++import org.bouncycastle.math.ec.ECConstants;
++import org.bouncycastle.math.ec.ECFieldElement;
++import org.bouncycastle.math.ec.ECMultiplier;
++import org.bouncycastle.math.ec.ECPoint;
++import org.bouncycastle.math.ec.FixedPointCombMultiplier;
++import org.bouncycastle.util.Arrays;
++import org.bouncycastle.util.encoders.Hex;
++
++import java.io.IOException;
++import java.math.BigInteger;
++
++/**
++ * 有的国密需求是用户可以自己做预处理，签名验签只是对预处理的结果进行签名和验签
++ */
++public class SM2PreprocessSigner implements ECConstants {
++    private static final int DIGEST_LENGTH = 32;   // bytes
++
++    private final DSAKCalculator kCalculator = new RandomDSAKCalculator();
++    private Digest digest = null;
++
++    private ECDomainParameters ecParams;
++    private ECPoint pubPoint;
++    private ECKeyParameters ecKey;
++    private byte[] userID;
++
++    public void init(boolean forSigning, CipherParameters param) {
++        init(forSigning, new SM3Digest(), param);
++    }
++
++    public void init(boolean forSigning, Digest digest, CipherParameters param) throws RuntimeException {
++        CipherParameters baseParam;
++
++        if (digest.getDigestSize() != DIGEST_LENGTH) {
++            throw new RuntimeException("Digest size must be " + DIGEST_LENGTH);
++        }
++        this.digest = digest;
++
++        if (param instanceof ParametersWithID) {
++            baseParam = ((ParametersWithID) param).getParameters();
++            userID = ((ParametersWithID) param).getID();
++        } else {
++            baseParam = param;
++            userID = Hex.decode("31323334353637383132333435363738"); // the default value
++        }
++
++        if (forSigning) {
++            if (baseParam instanceof ParametersWithRandom) {
++                ParametersWithRandom rParam = (ParametersWithRandom) baseParam;
++
++                ecKey = (ECKeyParameters) rParam.getParameters();
++                ecParams = ecKey.getParameters();
++                kCalculator.init(ecParams.getN(), rParam.getRandom());
++            } else {
++                ecKey = (ECKeyParameters) baseParam;
++                ecParams = ecKey.getParameters();
++                kCalculator.init(ecParams.getN(), CryptoServicesRegistrar.getSecureRandom());
++            }
++            pubPoint = createBasePointMultiplier().multiply(ecParams.getG(), ((ECPrivateKeyParameters) ecKey).getD()).normalize();
++        } else {
++            ecKey = (ECKeyParameters) baseParam;
++            ecParams = ecKey.getParameters();
++            pubPoint = ((ECPublicKeyParameters) ecKey).getQ();
++        }
++    }
++
++    /**
++     * 预处理，辅助方法
++     * ZA=H256(ENT LA ∥ IDA ∥ a ∥ b ∥ xG ∥yG ∥ xA ∥ yA)。
++     * M=ZA ∥ M；
++     * e = Hv(M)
++     * @return
++     */
++    public byte[] preprocess(byte[] m, int off, int len) {
++        byte[] z = getZ(userID);
++        digest.update(z, 0, z.length);
++        digest.update(m, off, len);
++        byte[] eHash = new byte[DIGEST_LENGTH];
++        digest.doFinal(eHash, 0);
++        return eHash;
++    }
++
++    public boolean verifySignature(byte[] eHash, byte[] signature) {
++        try {
++            BigInteger[] rs = derDecode(signature);
++            if (rs != null) {
++                return verifySignature(eHash, rs[0], rs[1]);
++            }
++        } catch (IOException e) {
++        }
++
++        return false;
++    }
++
++    public void reset() {
++        digest.reset();
++    }
++
++    public byte[] generateSignature(byte[] eHash) throws CryptoException {
++        BigInteger n = ecParams.getN();
++        BigInteger e = calculateE(eHash);
++        BigInteger d = ((ECPrivateKeyParameters) ecKey).getD();
++
++        BigInteger r, s;
++
++        ECMultiplier basePointMultiplier = createBasePointMultiplier();
++
++        // 5.2.1 Draft RFC:  SM2 Public Key Algorithms
++        do // generate s
++        {
++            BigInteger k;
++            do // generate r
++            {
++                // A3
++                k = kCalculator.nextK();
++
++                // A4
++                ECPoint p = basePointMultiplier.multiply(ecParams.getG(), k).normalize();
++
++                // A5
++                r = e.add(p.getAffineXCoord().toBigInteger()).mod(n);
++            }
++            while (r.equals(ZERO) || r.add(k).equals(n));
++
++            // A6
++            BigInteger dPlus1ModN = d.add(ONE).modInverse(n);
++
++            s = k.subtract(r.multiply(d)).mod(n);
++            s = dPlus1ModN.multiply(s).mod(n);
++        }
++        while (s.equals(ZERO));
++
++        // A7
++        try {
++            return derEncode(r, s);
++        } catch (IOException ex) {
++            throw new CryptoException("unable to encode signature: " + ex.getMessage(), ex);
++        }
++    }
++
++    private boolean verifySignature(byte[] eHash, BigInteger r, BigInteger s) {
++        BigInteger n = ecParams.getN();
++
++        // 5.3.1 Draft RFC:  SM2 Public Key Algorithms
++        // B1
++        if (r.compareTo(ONE) < 0 || r.compareTo(n) >= 0) {
++            return false;
++        }
++
++        // B2
++        if (s.compareTo(ONE) < 0 || s.compareTo(n) >= 0) {
++            return false;
++        }
++
++        // B3 eHash
++
++        // B4
++        BigInteger e = calculateE(eHash);
++
++        // B5
++        BigInteger t = r.add(s).mod(n);
++        if (t.equals(ZERO)) {
++            return false;
++        }
++
++        // B6
++        ECPoint q = ((ECPublicKeyParameters) ecKey).getQ();
++        ECPoint x1y1 = ECAlgorithms.sumOfTwoMultiplies(ecParams.getG(), s, q, t).normalize();
++        if (x1y1.isInfinity()) {
++            return false;
++        }
++
++        // B7
++        BigInteger expectedR = e.add(x1y1.getAffineXCoord().toBigInteger()).mod(n);
++
++        return expectedR.equals(r);
++    }
++
++    private byte[] digestDoFinal() {
++        byte[] result = new byte[digest.getDigestSize()];
++        digest.doFinal(result, 0);
++
++        reset();
++
++        return result;
++    }
++
++    private byte[] getZ(byte[] userID) {
++        digest.reset();
++
++        addUserID(digest, userID);
++
++        addFieldElement(digest, ecParams.getCurve().getA());
++        addFieldElement(digest, ecParams.getCurve().getB());
++        addFieldElement(digest, ecParams.getG().getAffineXCoord());
++        addFieldElement(digest, ecParams.getG().getAffineYCoord());
++        addFieldElement(digest, pubPoint.getAffineXCoord());
++        addFieldElement(digest, pubPoint.getAffineYCoord());
++
++        byte[] result = new byte[digest.getDigestSize()];
++
++        digest.doFinal(result, 0);
++
++        return result;
++    }
++
++    private void addUserID(Digest digest, byte[] userID) {
++        int len = userID.length * 8;
++        digest.update((byte) (len >> 8 & 0xFF));
++        digest.update((byte) (len & 0xFF));
++        digest.update(userID, 0, userID.length);
++    }
++
++    private void addFieldElement(Digest digest, ECFieldElement v) {
++        byte[] p = v.getEncoded();
++        digest.update(p, 0, p.length);
++    }
++
++    protected ECMultiplier createBasePointMultiplier() {
++        return new FixedPointCombMultiplier();
++    }
++
++    protected BigInteger calculateE(byte[] message) {
++        return new BigInteger(1, message);
++    }
++
++    protected BigInteger[] derDecode(byte[] encoding)
++        throws IOException {
++        ASN1Sequence seq = ASN1Sequence.getInstance(ASN1Primitive.fromByteArray(encoding));
++        if (seq.size() != 2) {
++            return null;
++        }
++
++        BigInteger r = ASN1Integer.getInstance(seq.getObjectAt(0)).getValue();
++        BigInteger s = ASN1Integer.getInstance(seq.getObjectAt(1)).getValue();
++
++        byte[] expectedEncoding = derEncode(r, s);
++        if (!Arrays.constantTimeAreEqual(expectedEncoding, encoding)) {
++            return null;
++        }
++
++        return new BigInteger[]{r, s};
++    }
++
++    protected byte[] derEncode(BigInteger r, BigInteger s)
++        throws IOException {
++
++        ASN1EncodableVector v = new ASN1EncodableVector();
++        v.add(new ASN1Integer(r));
++        v.add(new ASN1Integer(s));
++        return new DERSequence(v).getEncoded(ASN1Encoding.DER);
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2Util.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2Util.java
+new file mode 100644
+index 0000000..cd9fad9
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM2Util.java
+@@ -0,0 +1,414 @@
++package org.hyperledger.fabric.sdk.security.gmhelper;
++
++import org.bouncycastle.asn1.ASN1Encodable;
++import org.bouncycastle.asn1.ASN1EncodableVector;
++import org.bouncycastle.asn1.ASN1Encoding;
++import org.bouncycastle.asn1.ASN1Integer;
++import org.bouncycastle.asn1.ASN1Sequence;
++import org.bouncycastle.asn1.DEROctetString;
++import org.bouncycastle.asn1.DERSequence;
++import org.bouncycastle.crypto.AsymmetricCipherKeyPair;
++import org.bouncycastle.crypto.CipherParameters;
++import org.bouncycastle.crypto.CryptoException;
++import org.bouncycastle.crypto.InvalidCipherTextException;
++import org.bouncycastle.crypto.engines.SM2Engine;
++import org.bouncycastle.crypto.params.ECDomainParameters;
++import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
++import org.bouncycastle.crypto.params.ECPublicKeyParameters;
++import org.bouncycastle.crypto.params.ParametersWithID;
++import org.bouncycastle.crypto.params.ParametersWithRandom;
++import org.bouncycastle.crypto.signers.SM2Signer;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey;
++import org.bouncycastle.math.ec.ECPoint;
++import org.bouncycastle.math.ec.custom.gm.SM2P256V1Curve;
++
++import java.io.IOException;
++import java.math.BigInteger;
++import java.security.InvalidAlgorithmParameterException;
++import java.security.KeyPair;
++import java.security.NoSuchAlgorithmException;
++import java.security.NoSuchProviderException;
++import java.security.SecureRandom;
++import java.security.spec.ECFieldFp;
++import java.security.spec.EllipticCurve;
++
++
++public class SM2Util extends GMBaseUtil {
++    //////////////////////////////////////////////////////////////////////////////////////
++    /*
++     * 以下为SM2推荐曲线参数
++     */
++    public static final SM2P256V1Curve CURVE = new SM2P256V1Curve();
++    public final static BigInteger SM2_ECC_P = CURVE.getQ();
++    public final static BigInteger SM2_ECC_A = CURVE.getA().toBigInteger();
++    public final static BigInteger SM2_ECC_B = CURVE.getB().toBigInteger();
++    public final static BigInteger SM2_ECC_N = CURVE.getOrder();
++    public final static BigInteger SM2_ECC_H = CURVE.getCofactor();
++    public final static BigInteger SM2_ECC_GX = new BigInteger(
++        "32C4AE2C1F1981195F9904466A39C9948FE30BBFF2660BE1715A4589334C74C7", 16);
++    public final static BigInteger SM2_ECC_GY = new BigInteger(
++        "BC3736A2F4F6779C59BDCEE36B692153D0A9877CC62A474002DF32E52139F0A0", 16);
++    public static final ECPoint G_POINT = CURVE.createPoint(SM2_ECC_GX, SM2_ECC_GY);
++    public static final ECDomainParameters DOMAIN_PARAMS = new ECDomainParameters(CURVE, G_POINT,
++        SM2_ECC_N, SM2_ECC_H);
++    public static final int CURVE_LEN = BCECUtil.getCurveLength(DOMAIN_PARAMS);
++    //////////////////////////////////////////////////////////////////////////////////////
++
++    public static final EllipticCurve JDK_CURVE = new EllipticCurve(new ECFieldFp(SM2_ECC_P), SM2_ECC_A, SM2_ECC_B);
++    public static final java.security.spec.ECPoint JDK_G_POINT = new java.security.spec.ECPoint(
++        G_POINT.getAffineXCoord().toBigInteger(), G_POINT.getAffineYCoord().toBigInteger());
++    public static final java.security.spec.ECParameterSpec JDK_EC_SPEC = new java.security.spec.ECParameterSpec(
++        JDK_CURVE, JDK_G_POINT, SM2_ECC_N, SM2_ECC_H.intValue());
++
++    //////////////////////////////////////////////////////////////////////////////////////
++
++    public static final int SM3_DIGEST_LENGTH = 32;
++
++    /**
++     * 生成ECC密钥对
++     *
++     * @return ECC密钥对
++     */
++    public static AsymmetricCipherKeyPair generateKeyPairParameter() {
++        SecureRandom random = new SecureRandom();
++        return BCECUtil.generateKeyPairParameter(DOMAIN_PARAMS, random);
++    }
++
++    public static KeyPair generateKeyPair() throws NoSuchProviderException, NoSuchAlgorithmException,
++        InvalidAlgorithmParameterException {
++        SecureRandom random = new SecureRandom();
++        return BCECUtil.generateKeyPair(DOMAIN_PARAMS, random);
++    }
++
++    /**
++     * 只获取私钥里的d，32字节
++     *
++     * @param privateKey
++     * @return
++     */
++    public static byte[] getRawPrivateKey(BCECPrivateKey privateKey) {
++        return fixToCurveLengthBytes(privateKey.getD().toByteArray());
++    }
++
++    /**
++     * 只获取公钥里的XY分量，64字节
++     *
++     * @param publicKey
++     * @return
++     */
++    public static byte[] getRawPublicKey(BCECPublicKey publicKey) {
++        byte[] src65 = publicKey.getQ().getEncoded(false);
++        byte[] rawXY = new byte[CURVE_LEN * 2];//SM2的话这里应该是64字节
++        System.arraycopy(src65, 1, rawXY, 0, rawXY.length);
++        return rawXY;
++    }
++   
++    public static byte[] encrypt(BCECPublicKey pubKey, byte[] srcData) throws InvalidCipherTextException {
++        ECPublicKeyParameters pubKeyParameters = BCECUtil.convertPublicKeyToParameters(pubKey);
++        return encrypt(pubKeyParameters, srcData);
++    }
++
++    /**
++     * ECC公钥加密
++     *
++     * @param pubKeyParameters ECC公钥
++     * @param srcData          源数据
++     * @return SM2密文，实际包含三部分：ECC公钥、真正的密文、公钥和原文的SM3-HASH值
++     * @throws InvalidCipherTextException
++     */
++    public static byte[] encrypt(ECPublicKeyParameters pubKeyParameters, byte[] srcData)
++        throws InvalidCipherTextException {
++        SM2Engine engine = new SM2Engine();
++        ParametersWithRandom pwr = new ParametersWithRandom(pubKeyParameters, new SecureRandom());
++        engine.init(true, pwr);
++        return engine.processBlock(srcData, 0, srcData.length);
++    }
++
++    public static byte[] decrypt(BCECPrivateKey priKey, byte[] sm2Cipher) throws InvalidCipherTextException {
++        ECPrivateKeyParameters priKeyParameters = BCECUtil.convertPrivateKeyToParameters(priKey);
++        return decrypt(priKeyParameters, sm2Cipher);
++    }
++
++    /**
++     * ECC私钥解密
++     *
++     * @param priKeyParameters ECC私钥
++     * @param sm2Cipher        SM2密文，实际包含三部分：ECC公钥、真正的密文、公钥和原文的SM3-HASH值
++     * @return 原文
++     * @throws InvalidCipherTextException
++     */
++    public static byte[] decrypt(ECPrivateKeyParameters priKeyParameters, byte[] sm2Cipher)
++        throws InvalidCipherTextException {
++        SM2Engine engine = new SM2Engine();
++        engine.init(false, priKeyParameters);
++        return engine.processBlock(sm2Cipher, 0, sm2Cipher.length);
++    }
++
++    /**
++     * 分解SM2密文
++     *
++     * @param cipherText SM2密文
++     * @return
++     */
++    public static SM2Cipher parseSM2Cipher(byte[] cipherText) {
++        int curveLength = BCECUtil.getCurveLength(DOMAIN_PARAMS);
++        return parseSM2Cipher(curveLength, SM3_DIGEST_LENGTH, cipherText);
++    }
++
++    /**
++     * 分解SM2密文
++     *
++     * @param curveLength  ECC曲线长度
++     * @param digestLength HASH长度
++     * @param cipherText   SM2密文
++     * @return
++     */
++    public static SM2Cipher parseSM2Cipher(int curveLength, int digestLength,
++        byte[] cipherText) {
++        byte[] c1 = new byte[curveLength * 2 + 1];
++        System.arraycopy(cipherText, 0, c1, 0, c1.length);
++        byte[] c2 = new byte[cipherText.length - c1.length - digestLength];
++        System.arraycopy(cipherText, c1.length, c2, 0, c2.length);
++        byte[] c3 = new byte[digestLength];
++        System.arraycopy(cipherText, c1.length + c2.length, c3, 0, c3.length);
++        SM2Cipher result = new SM2Cipher();
++        result.setC1(c1);
++        result.setC2(c2);
++        result.setC3(c3);
++        result.setCipherText(cipherText);
++        return result;
++    }
++
++    /**
++     * DER编码C1C2C3密文（根据《SM2密码算法使用规范》 GM/T 0009-2012）
++     *
++     * @param cipher
++     * @return
++     * @throws IOException
++     */
++    public static byte[] encodeSM2CipherToDER(byte[] cipher) throws IOException {
++        int curveLength = BCECUtil.getCurveLength(DOMAIN_PARAMS);
++        return encodeSM2CipherToDER(curveLength, SM3_DIGEST_LENGTH, cipher);
++    }
++
++    /**
++     * DER编码C1C2C3密文（根据《SM2密码算法使用规范》 GM/T 0009-2012）
++     *
++     * @param curveLength
++     * @param digestLength
++     * @param cipher
++     * @return
++     * @throws IOException
++     */
++    public static byte[] encodeSM2CipherToDER(int curveLength, int digestLength, byte[] cipher)
++        throws IOException {
++        int startPos = 1;
++
++        byte[] c1x = new byte[curveLength];
++        System.arraycopy(cipher, startPos, c1x, 0, c1x.length);
++        startPos += c1x.length;
++
++        byte[] c1y = new byte[curveLength];
++        System.arraycopy(cipher, startPos, c1y, 0, c1y.length);
++        startPos += c1y.length;
++
++        byte[] c2 = new byte[cipher.length - c1x.length - c1y.length - 1 - digestLength];
++        System.arraycopy(cipher, startPos, c2, 0, c2.length);
++        startPos += c2.length;
++
++        byte[] c3 = new byte[digestLength];
++        System.arraycopy(cipher, startPos, c3, 0, c3.length);
++
++        ASN1Encodable[] arr = new ASN1Encodable[4];
++        arr[0] = new ASN1Integer(c1x);
++        arr[1] = new ASN1Integer(c1y);
++        arr[2] = new DEROctetString(c3);
++        arr[3] = new DEROctetString(c2);
++        DERSequence ds = new DERSequence(arr);
++        return ds.getEncoded(ASN1Encoding.DER);
++    }
++
++    /**
++     * 解DER编码密文（根据《SM2密码算法使用规范》 GM/T 0009-2012）
++     *
++     * @param derCipher
++     * @return
++     */
++    public static byte[] decodeDERSM2Cipher(byte[] derCipher) {
++        ASN1Sequence as = DERSequence.getInstance(derCipher);
++        byte[] c1x = ((ASN1Integer) as.getObjectAt(0)).getValue().toByteArray();
++        byte[] c1y = ((ASN1Integer) as.getObjectAt(1)).getValue().toByteArray();
++        byte[] c3 = ((DEROctetString) as.getObjectAt(2)).getOctets();
++        byte[] c2 = ((DEROctetString) as.getObjectAt(3)).getOctets();
++
++        int pos = 0;
++        byte[] cipherText = new byte[1 + c1x.length + c1y.length + c2.length + c3.length];
++
++        final byte uncompressedFlag = 0x04;
++        cipherText[0] = uncompressedFlag;
++        pos += 1;
++
++        System.arraycopy(c1x, 0, cipherText, pos, c1x.length);
++        pos += c1x.length;
++
++        System.arraycopy(c1y, 0, cipherText, pos, c1y.length);
++        pos += c1y.length;
++
++        System.arraycopy(c2, 0, cipherText, pos, c2.length);
++        pos += c2.length;
++
++        System.arraycopy(c3, 0, cipherText, pos, c3.length);
++
++        return cipherText;
++    }
++
++    public static byte[] sign(BCECPrivateKey priKey, byte[] srcData) throws NoSuchAlgorithmException,
++        NoSuchProviderException, CryptoException {
++        ECPrivateKeyParameters priKeyParameters = BCECUtil.convertPrivateKeyToParameters(priKey);
++        return sign(priKeyParameters, null, srcData);
++    }
++
++    /**
++     * ECC私钥签名
++     * 不指定withId，则默认withId为字节数组:"1234567812345678".getBytes()
++     *
++     * @param priKeyParameters ECC私钥
++     * @param srcData          源数据
++     * @return 签名
++     * @throws CryptoException
++     */
++    public static byte[] sign(ECPrivateKeyParameters priKeyParameters, byte[] srcData) throws CryptoException {
++        return sign(priKeyParameters, null, srcData);
++    }
++
++    public static byte[] sign(BCECPrivateKey priKey, byte[] withId, byte[] srcData) throws CryptoException {
++        ECPrivateKeyParameters priKeyParameters = BCECUtil.convertPrivateKeyToParameters(priKey);
++        return sign(priKeyParameters, withId, srcData);
++    }
++
++    /**
++     * ECC私钥签名
++     *
++     * @param priKeyParameters ECC私钥
++     * @param withId           可以为null，若为null，则默认withId为字节数组:"1234567812345678".getBytes()
++     * @param srcData          源数据
++     * @return 签名
++     * @throws CryptoException
++     */
++    public static byte[] sign(ECPrivateKeyParameters priKeyParameters, byte[] withId, byte[] srcData)
++        throws CryptoException {
++        SM2Signer signer = new SM2Signer();
++        CipherParameters param = null;
++        ParametersWithRandom pwr = new ParametersWithRandom(priKeyParameters, new SecureRandom());
++        if (withId != null) {
++            param = new ParametersWithID(pwr, withId);
++        } else {
++            param = pwr;
++        }
++        signer.init(true, param);
++        signer.update(srcData, 0, srcData.length);
++        return signer.generateSignature();
++    }
++
++    /**
++     * 将DER编码的SM2签名解析成64字节的纯R+S字节流
++     *
++     * @param derSign
++     * @return
++     */
++    public static byte[] decodeDERSM2Sign(byte[] derSign) {
++        ASN1Sequence as = DERSequence.getInstance(derSign);
++        byte[] rBytes = ((ASN1Integer) as.getObjectAt(0)).getValue().toByteArray();
++        byte[] sBytes = ((ASN1Integer) as.getObjectAt(1)).getValue().toByteArray();
++        //由于大数的补0规则，所以可能会出现33个字节的情况，要修正回32个字节
++        rBytes = fixToCurveLengthBytes(rBytes);
++        sBytes = fixToCurveLengthBytes(sBytes);
++        byte[] rawSign = new byte[rBytes.length + sBytes.length];
++        System.arraycopy(rBytes, 0, rawSign, 0, rBytes.length);
++        System.arraycopy(sBytes, 0, rawSign, rBytes.length, sBytes.length);
++        return rawSign;
++    }
++
++    /**
++     * 把64字节的纯R+S字节流转换成DER编码字节流
++     *
++     * @param rawSign
++     * @return
++     * @throws IOException
++     */
++    public static byte[] encodeSM2SignToDER(byte[] rawSign) throws IOException {
++        //要保证大数是正数
++        BigInteger r = new BigInteger(1, extractBytes(rawSign, 0, 32));
++        BigInteger s = new BigInteger(1, extractBytes(rawSign, 32, 32));
++        ASN1EncodableVector v = new ASN1EncodableVector();
++        v.add(new ASN1Integer(r));
++        v.add(new ASN1Integer(s));
++        return new DERSequence(v).getEncoded(ASN1Encoding.DER);
++    }
++
++    public static boolean verify(BCECPublicKey pubKey, byte[] srcData, byte[] sign) {
++        ECPublicKeyParameters pubKeyParameters = BCECUtil.convertPublicKeyToParameters(pubKey);
++        return verify(pubKeyParameters, null, srcData, sign);
++    }
++
++    /**
++     * ECC公钥验签
++     * 不指定withId，则默认withId为字节数组:"1234567812345678".getBytes()
++     *
++     * @param pubKeyParameters ECC公钥
++     * @param srcData          源数据
++     * @param sign             签名
++     * @return 验签成功返回true，失败返回false
++     */
++    public static boolean verify(ECPublicKeyParameters pubKeyParameters, byte[] srcData, byte[] sign) {
++        return verify(pubKeyParameters, null, srcData, sign);
++    }
++
++    public static boolean verify(BCECPublicKey pubKey, byte[] withId, byte[] srcData, byte[] sign) {
++        ECPublicKeyParameters pubKeyParameters = BCECUtil.convertPublicKeyToParameters(pubKey);
++        return verify(pubKeyParameters, withId, srcData, sign);
++    }
++
++    /**
++     * ECC公钥验签
++     *
++     * @param pubKeyParameters ECC公钥
++     * @param withId           可以为null，若为null，则默认withId为字节数组:"1234567812345678".getBytes()
++     * @param srcData          源数据
++     * @param sign             签名
++     * @return 验签成功返回true，失败返回false
++     */
++    public static boolean verify(ECPublicKeyParameters pubKeyParameters, byte[] withId, byte[] srcData, byte[] sign) {
++        SM2Signer signer = new SM2Signer();
++        CipherParameters param;
++        if (withId != null) {
++            param = new ParametersWithID(pubKeyParameters, withId);
++        } else {
++            param = pubKeyParameters;
++        }
++        signer.init(false, param);
++        signer.update(srcData, 0, srcData.length);
++        return signer.verifySignature(sign);
++    }
++
++    private static byte[] extractBytes(byte[] src, int offset, int length) {
++        byte[] result = new byte[length];
++        System.arraycopy(src, offset, result, 0, result.length);
++        return result;
++    }
++
++    private static byte[] fixToCurveLengthBytes(byte[] src) {
++        if (src.length == CURVE_LEN) {
++            return src;
++        }
++
++        byte[] result = new byte[CURVE_LEN];
++        if (src.length > CURVE_LEN) {
++            System.arraycopy(src, src.length - result.length, result, 0, result.length);
++        } else {
++            System.arraycopy(src, 0, result, result.length - src.length, src.length);
++        }
++        return result;
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM3Util.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM3Util.java
+new file mode 100644
+index 0000000..7dccc90
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM3Util.java
+@@ -0,0 +1,38 @@
++package org.hyperledger.fabric.sdk.security.gmhelper;
++
++import org.bouncycastle.crypto.digests.SM3Digest;
++import org.bouncycastle.crypto.macs.HMac;
++import org.bouncycastle.crypto.params.KeyParameter;
++
++import java.util.Arrays;
++
++public class SM3Util extends GMBaseUtil {
++
++    public static byte[] hash(byte[] srcData) {
++        SM3Digest digest = new SM3Digest();
++        digest.update(srcData, 0, srcData.length);
++        byte[] hash = new byte[digest.getDigestSize()];
++        digest.doFinal(hash, 0);
++        return hash;
++    }
++
++    public static boolean verify(byte[] srcData, byte[] sm3Hash) {
++        byte[] newHash = hash(srcData);
++        if (Arrays.equals(newHash, sm3Hash)) {
++            return true;
++        } else {
++            return false;
++        }
++    }
++
++    public static byte[] hmac(byte[] key, byte[] srcData) {
++        KeyParameter keyParameter = new KeyParameter(key);
++        SM3Digest digest = new SM3Digest();
++        HMac mac = new HMac(digest);
++        mac.init(keyParameter);
++        mac.update(srcData, 0, srcData.length);
++        byte[] result = new byte[mac.getMacSize()];
++        mac.doFinal(result, 0);
++        return result;
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM4Util.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM4Util.java
+new file mode 100644
+index 0000000..f31fb96
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/SM4Util.java
+@@ -0,0 +1,188 @@
++package org.hyperledger.fabric.sdk.security.gmhelper;
++
++import org.bouncycastle.crypto.CipherParameters;
++import org.bouncycastle.crypto.engines.SM4Engine;
++import org.bouncycastle.crypto.macs.CBCBlockCipherMac;
++import org.bouncycastle.crypto.macs.GMac;
++import org.bouncycastle.crypto.modes.GCMBlockCipher;
++import org.bouncycastle.crypto.paddings.BlockCipherPadding;
++import org.bouncycastle.crypto.paddings.PKCS7Padding;
++import org.bouncycastle.crypto.params.KeyParameter;
++import org.bouncycastle.crypto.params.ParametersWithIV;
++import org.bouncycastle.jce.provider.BouncyCastleProvider;
++
++import java.security.InvalidAlgorithmParameterException;
++import java.security.InvalidKeyException;
++import java.security.Key;
++import java.security.NoSuchAlgorithmException;
++import java.security.NoSuchProviderException;
++import java.security.SecureRandom;
++import javax.crypto.BadPaddingException;
++import javax.crypto.Cipher;
++import javax.crypto.IllegalBlockSizeException;
++import javax.crypto.KeyGenerator;
++import javax.crypto.Mac;
++import javax.crypto.NoSuchPaddingException;
++import javax.crypto.spec.IvParameterSpec;
++import javax.crypto.spec.SecretKeySpec;
++
++public class SM4Util extends GMBaseUtil {
++    public static final String ALGORITHM_NAME = "SM4";
++    public static final String ALGORITHM_NAME_ECB_PADDING = "SM4/ECB/PKCS5Padding";
++    public static final String ALGORITHM_NAME_ECB_NOPADDING = "SM4/ECB/NoPadding";
++    public static final String ALGORITHM_NAME_CBC_PADDING = "SM4/CBC/PKCS5Padding";
++    public static final String ALGORITHM_NAME_CBC_NOPADDING = "SM4/CBC/NoPadding";
++    public static final int DEFAULT_KEY_SIZE = 128;
++
++    public static byte[] generateKey() throws NoSuchAlgorithmException, NoSuchProviderException {
++        return generateKey(DEFAULT_KEY_SIZE);
++    }
++
++    public static byte[] generateKey(int keySize) throws NoSuchAlgorithmException, NoSuchProviderException {
++        KeyGenerator kg = KeyGenerator.getInstance(ALGORITHM_NAME, BouncyCastleProvider.PROVIDER_NAME);
++        kg.init(keySize, new SecureRandom());
++        return kg.generateKey().getEncoded();
++    }
++
++    public static byte[] encrypt_Ecb_Padding(byte[] key, byte[] data)
++        throws InvalidKeyException, NoSuchAlgorithmException, NoSuchProviderException,
++        NoSuchPaddingException, IllegalBlockSizeException, BadPaddingException {
++        Cipher cipher = generateEcbCipher(ALGORITHM_NAME_ECB_PADDING, Cipher.ENCRYPT_MODE, key);
++        return cipher.doFinal(data);
++    }
++
++    public static byte[] decrypt_Ecb_Padding(byte[] key, byte[] cipherText)
++        throws IllegalBlockSizeException, BadPaddingException, InvalidKeyException,
++        NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException {
++        Cipher cipher = generateEcbCipher(ALGORITHM_NAME_ECB_PADDING, Cipher.DECRYPT_MODE, key);
++        return cipher.doFinal(cipherText);
++    }
++
++    public static byte[] encrypt_Ecb_NoPadding(byte[] key, byte[] data)
++        throws InvalidKeyException, NoSuchAlgorithmException, NoSuchProviderException,
++        NoSuchPaddingException, IllegalBlockSizeException, BadPaddingException {
++        Cipher cipher = generateEcbCipher(ALGORITHM_NAME_ECB_NOPADDING, Cipher.ENCRYPT_MODE, key);
++        return cipher.doFinal(data);
++    }
++
++    public static byte[] decrypt_Ecb_NoPadding(byte[] key, byte[] cipherText)
++        throws IllegalBlockSizeException, BadPaddingException, InvalidKeyException,
++        NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException {
++        Cipher cipher = generateEcbCipher(ALGORITHM_NAME_ECB_NOPADDING, Cipher.DECRYPT_MODE, key);
++        return cipher.doFinal(cipherText);
++    }
++
++    public static byte[] encrypt_Cbc_Padding(byte[] key, byte[] iv, byte[] data)
++        throws InvalidKeyException, NoSuchAlgorithmException, NoSuchProviderException,
++        NoSuchPaddingException, IllegalBlockSizeException, BadPaddingException,
++        InvalidAlgorithmParameterException {
++        Cipher cipher = generateCbcCipher(ALGORITHM_NAME_CBC_PADDING, Cipher.ENCRYPT_MODE, key, iv);
++        return cipher.doFinal(data);
++    }
++
++    public static byte[] decrypt_Cbc_Padding(byte[] key, byte[] iv, byte[] cipherText)
++        throws IllegalBlockSizeException, BadPaddingException, InvalidKeyException,
++        NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException,
++        InvalidAlgorithmParameterException {
++        Cipher cipher = generateCbcCipher(ALGORITHM_NAME_CBC_PADDING, Cipher.DECRYPT_MODE, key, iv);
++        return cipher.doFinal(cipherText);
++    }
++
++    public static byte[] encrypt_Cbc_NoPadding(byte[] key, byte[] iv, byte[] data)
++        throws InvalidKeyException, NoSuchAlgorithmException, NoSuchProviderException,
++        NoSuchPaddingException, IllegalBlockSizeException, BadPaddingException,
++        InvalidAlgorithmParameterException {
++        Cipher cipher = generateCbcCipher(ALGORITHM_NAME_CBC_NOPADDING, Cipher.ENCRYPT_MODE, key, iv);
++        return cipher.doFinal(data);
++    }
++
++    public static byte[] decrypt_Cbc_NoPadding(byte[] key, byte[] iv, byte[] cipherText)
++        throws IllegalBlockSizeException, BadPaddingException, InvalidKeyException,
++        NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException,
++        InvalidAlgorithmParameterException {
++        Cipher cipher = generateCbcCipher(ALGORITHM_NAME_CBC_NOPADDING, Cipher.DECRYPT_MODE, key, iv);
++        return cipher.doFinal(cipherText);
++    }
++
++    public static byte[] doCMac(byte[] key, byte[] data) throws NoSuchProviderException, NoSuchAlgorithmException,
++        InvalidKeyException {
++        Key keyObj = new SecretKeySpec(key, ALGORITHM_NAME);
++        return doMac("SM4-CMAC", keyObj, data);
++    }
++
++    public static byte[] doGMac(byte[] key, byte[] iv, int tagLength, byte[] data) {
++        org.bouncycastle.crypto.Mac mac = new GMac(new GCMBlockCipher(new SM4Engine()), tagLength * 8);
++        return doMac(mac, key, iv, data);
++    }
++
++    /**
++     * 默认使用PKCS7Padding/PKCS5Padding填充的CBCMAC
++     *
++     * @param key
++     * @param iv
++     * @param data
++     * @return
++     */
++    public static byte[] doCBCMac(byte[] key, byte[] iv, byte[] data) {
++        SM4Engine engine = new SM4Engine();
++        org.bouncycastle.crypto.Mac mac = new CBCBlockCipherMac(engine, engine.getBlockSize() * 8, new PKCS7Padding());
++        return doMac(mac, key, iv, data);
++    }
++
++    /**
++     *
++     * @param key
++     * @param iv
++     * @param padding 可以传null，传null表示NoPadding，由调用方保证数据必须是BlockSize的整数倍
++     * @param data
++     * @return
++     * @throws Exception
++     */
++    public static byte[] doCBCMac(byte[] key, byte[] iv, BlockCipherPadding padding, byte[] data) throws Exception {
++        SM4Engine engine = new SM4Engine();
++        if (padding == null) {
++            if (data.length % engine.getBlockSize() != 0) {
++                throw new Exception("if no padding, data length must be multiple of SM4 BlockSize");
++            }
++        }
++        org.bouncycastle.crypto.Mac mac = new CBCBlockCipherMac(engine, engine.getBlockSize() * 8, padding);
++        return doMac(mac, key, iv, data);
++    }
++
++
++    private static byte[] doMac(org.bouncycastle.crypto.Mac mac, byte[] key, byte[] iv, byte[] data) {
++        CipherParameters cipherParameters = new KeyParameter(key);
++        mac.init(new ParametersWithIV(cipherParameters, iv));
++        mac.update(data, 0, data.length);
++        byte[] result = new byte[mac.getMacSize()];
++        mac.doFinal(result, 0);
++        return result;
++    }
++
++    private static byte[] doMac(String algorithmName, Key key, byte[] data) throws NoSuchProviderException,
++        NoSuchAlgorithmException, InvalidKeyException {
++        Mac mac = Mac.getInstance(algorithmName, BouncyCastleProvider.PROVIDER_NAME);
++        mac.init(key);
++        mac.update(data);
++        return mac.doFinal();
++    }
++
++    private static Cipher generateEcbCipher(String algorithmName, int mode, byte[] key)
++        throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException,
++        InvalidKeyException {
++        Cipher cipher = Cipher.getInstance(algorithmName, BouncyCastleProvider.PROVIDER_NAME);
++        Key sm4Key = new SecretKeySpec(key, ALGORITHM_NAME);
++        cipher.init(mode, sm4Key);
++        return cipher;
++    }
++
++    private static Cipher generateCbcCipher(String algorithmName, int mode, byte[] key, byte[] iv)
++        throws InvalidKeyException, InvalidAlgorithmParameterException, NoSuchAlgorithmException,
++        NoSuchProviderException, NoSuchPaddingException {
++        Cipher cipher = Cipher.getInstance(algorithmName, BouncyCastleProvider.PROVIDER_NAME);
++        Key sm4Key = new SecretKeySpec(key, ALGORITHM_NAME);
++        IvParameterSpec ivParameterSpec = new IvParameterSpec(iv);
++        cipher.init(mode, sm4Key, ivParameterSpec);
++        return cipher;
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/CertSNAllocator.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/CertSNAllocator.java
+new file mode 100644
+index 0000000..dfeca7f
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/CertSNAllocator.java
+@@ -0,0 +1,7 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert;
++
++import java.math.BigInteger;
++
++public interface CertSNAllocator {
++    BigInteger incrementAndGet() throws Exception;
++}
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/CommonUtil.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/CommonUtil.java
+new file mode 100644
+index 0000000..4c5f50e
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/CommonUtil.java
+@@ -0,0 +1,69 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert;
++
++import org.bouncycastle.asn1.ASN1ObjectIdentifier;
++import org.bouncycastle.asn1.x500.X500Name;
++import org.bouncycastle.asn1.x500.X500NameBuilder;
++import org.bouncycastle.asn1.x500.style.BCStyle;
++import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
++import org.bouncycastle.jce.provider.BouncyCastleProvider;
++import org.bouncycastle.operator.ContentSigner;
++import org.bouncycastle.operator.DefaultDigestAlgorithmIdentifierFinder;
++import org.bouncycastle.operator.DefaultSignatureAlgorithmIdentifierFinder;
++import org.bouncycastle.operator.OperatorCreationException;
++import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
++import org.bouncycastle.pkcs.PKCS10CertificationRequest;
++import org.bouncycastle.pkcs.PKCS10CertificationRequestBuilder;
++import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
++import org.hyperledger.fabric.sdk.security.gmhelper.cert.exception.InvalidX500NameException;
++
++import java.security.PrivateKey;
++import java.util.Iterator;
++import java.util.Map;
++
++public class CommonUtil {
++    /**
++     * 如果不知道怎么填充names，可以查看org.bouncycastle.asn1.x500.style.BCStyle这个类，
++     * names的key值必须是BCStyle.DefaultLookUp中存在的（可以不关心大小写）
++     *
++     * @param names
++     * @return
++     * @throws InvalidX500NameException
++     */
++    public static X500Name buildX500Name(Map<String, String> names) throws InvalidX500NameException {
++        if (names == null || names.size() == 0) {
++            throw new InvalidX500NameException("names can not be empty");
++        }
++        try {
++            X500NameBuilder builder = new X500NameBuilder();
++            Iterator itr = names.entrySet().iterator();
++            BCStyle x500NameStyle = (BCStyle) BCStyle.INSTANCE;
++            Map.Entry entry;
++            while (itr.hasNext()) {
++                entry = (Map.Entry) itr.next();
++                ASN1ObjectIdentifier oid = x500NameStyle.attrNameToOID((String) entry.getKey());
++                builder.addRDN(oid, (String) entry.getValue());
++            }
++            return builder.build();
++        } catch (Exception ex) {
++            throw new InvalidX500NameException(ex.getMessage(), ex);
++        }
++    }
++
++    public static PKCS10CertificationRequest createCSR(X500Name subject, SM2PublicKey pubKey, PrivateKey priKey,
++        String signAlgo) throws OperatorCreationException {
++        PKCS10CertificationRequestBuilder csrBuilder = new JcaPKCS10CertificationRequestBuilder(subject, pubKey);
++        ContentSigner signerBuilder = new JcaContentSignerBuilder(signAlgo)
++            .setProvider(BouncyCastleProvider.PROVIDER_NAME).build(priKey);
++        return csrBuilder.build(signerBuilder);
++    }
++
++    public static AlgorithmIdentifier findSignatureAlgorithmIdentifier(String algoName) {
++        DefaultSignatureAlgorithmIdentifierFinder sigFinder = new DefaultSignatureAlgorithmIdentifierFinder();
++        return sigFinder.find(algoName);
++    }
++
++    public static AlgorithmIdentifier findDigestAlgorithmIdentifier(String algoName) {
++        DefaultDigestAlgorithmIdentifierFinder digFinder = new DefaultDigestAlgorithmIdentifierFinder();
++        return digFinder.find(findSignatureAlgorithmIdentifier(algoName));
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/FileSNAllocator.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/FileSNAllocator.java
+new file mode 100644
+index 0000000..8ac92a7
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/FileSNAllocator.java
+@@ -0,0 +1,48 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert;
++
++import java.io.IOException;
++import java.io.RandomAccessFile;
++import java.math.BigInteger;
++
++public class FileSNAllocator implements CertSNAllocator {
++    private static final String SN_FILENAME = "sn.dat";
++    private static String snFilePath;
++
++    static {
++        ClassLoader loader = FileSNAllocator.class.getClassLoader();
++        snFilePath = loader.getResource(SN_FILENAME).getPath();
++    }
++
++    public synchronized BigInteger incrementAndGet() throws Exception {
++        BigInteger sn = readSN();
++        writeSN(sn.add(BigInteger.ONE));
++        return sn;
++    }
++
++    private BigInteger readSN() throws IOException {
++        RandomAccessFile raf = null;
++        try {
++            raf = new RandomAccessFile(snFilePath, "r");
++            byte[] data = new byte[(int) raf.length()];
++            raf.read(data);
++            String snStr = new String(data);
++            return new BigInteger(snStr);
++        } finally {
++            if (raf != null) {
++                raf.close();
++            }
++        }
++    }
++
++    private void writeSN(BigInteger sn) throws IOException {
++        RandomAccessFile raf = null;
++        try {
++            raf = new RandomAccessFile(snFilePath, "rw");
++            raf.writeBytes(sn.toString(10));
++        } finally {
++            if (raf != null) {
++                raf.close();
++            }
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2CertUtil.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2CertUtil.java
+new file mode 100644
+index 0000000..d1827df
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2CertUtil.java
+@@ -0,0 +1,170 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert;
++
++import org.bouncycastle.asn1.pkcs.ContentInfo;
++import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
++import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
++import org.bouncycastle.cert.X509CertificateHolder;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey;
++import org.bouncycastle.jce.interfaces.ECPublicKey;
++import org.bouncycastle.jce.provider.BouncyCastleProvider;
++import org.bouncycastle.jce.spec.ECParameterSpec;
++import org.bouncycastle.jce.spec.ECPublicKeySpec;
++import org.bouncycastle.math.ec.ECPoint;
++import org.bouncycastle.operator.InputDecryptorProvider;
++import org.bouncycastle.pkcs.PKCS12PfxPdu;
++import org.bouncycastle.pkcs.PKCS12SafeBag;
++import org.bouncycastle.pkcs.PKCS12SafeBagFactory;
++import org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfo;
++import org.bouncycastle.pkcs.jcajce.JcePKCSPBEInputDecryptorProviderBuilder;
++import org.hyperledger.fabric.sdk.security.gmhelper.BCECUtil;
++import org.hyperledger.fabric.sdk.security.gmhelper.SM2Util;
++
++import java.io.ByteArrayInputStream;
++import java.io.FileInputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.security.NoSuchProviderException;
++import java.security.cert.CertPath;
++import java.security.cert.CertificateEncodingException;
++import java.security.cert.CertificateException;
++import java.security.cert.CertificateFactory;
++import java.security.cert.X509Certificate;
++import java.util.List;
++
++public class SM2CertUtil {
++    public static BCECPublicKey getBCECPublicKey(X509Certificate sm2Cert) {
++        ECPublicKey pubKey = (ECPublicKey) sm2Cert.getPublicKey();
++        ECPoint q = pubKey.getQ();
++        ECParameterSpec parameterSpec = new ECParameterSpec(SM2Util.CURVE, SM2Util.G_POINT,
++            SM2Util.SM2_ECC_N, SM2Util.SM2_ECC_H);
++        ECPublicKeySpec pubKeySpec = new ECPublicKeySpec(q, parameterSpec);
++        return new BCECPublicKey(pubKey.getAlgorithm(), pubKeySpec,
++            BouncyCastleProvider.CONFIGURATION);
++    }
++
++    /**
++     * 校验证书
++     *
++     * @param issuerPubKey 从颁发者CA证书中提取出来的公钥
++     * @param cert         待校验的证书
++     * @return
++     */
++    public static boolean verifyCertificate(BCECPublicKey issuerPubKey, X509Certificate cert) {
++        try {
++            cert.verify(issuerPubKey, BouncyCastleProvider.PROVIDER_NAME);
++        } catch (Exception ex) {
++            return false;
++        }
++        return true;
++    }
++
++    public static X509Certificate getX509Certificate(String certFilePath) throws IOException, CertificateException,
++        NoSuchProviderException {
++        InputStream is = null;
++        try {
++            is = new FileInputStream(certFilePath);
++            return getX509Certificate(is);
++        } finally {
++            if (is != null) {
++                is.close();
++            }
++        }
++    }
++
++    public static X509Certificate getX509Certificate(byte[] certBytes) throws CertificateException,
++        NoSuchProviderException {
++        ByteArrayInputStream bais = new ByteArrayInputStream(certBytes);
++        return getX509Certificate(bais);
++    }
++
++    public static X509Certificate getX509Certificate(InputStream is) throws CertificateException,
++        NoSuchProviderException {
++        CertificateFactory cf = CertificateFactory.getInstance("X.509", BouncyCastleProvider.PROVIDER_NAME);
++        return (X509Certificate) cf.generateCertificate(is);
++    }
++
++    public static CertPath getCertificateChain(String certChainPath) throws IOException, CertificateException,
++        NoSuchProviderException {
++        InputStream is = null;
++        try {
++            is = new FileInputStream(certChainPath);
++            return getCertificateChain(is);
++        } finally {
++            if (is != null) {
++                is.close();
++            }
++        }
++    }
++
++    public static CertPath getCertificateChain(byte[] certChainBytes) throws CertificateException,
++        NoSuchProviderException {
++        ByteArrayInputStream bais = new ByteArrayInputStream(certChainBytes);
++        return getCertificateChain(bais);
++    }
++
++    public static byte[] getCertificateChainBytes(CertPath certChain) throws CertificateEncodingException {
++        return certChain.getEncoded("PKCS7");
++    }
++
++    public static CertPath getCertificateChain(InputStream is) throws CertificateException, NoSuchProviderException {
++        CertificateFactory cf = CertificateFactory.getInstance("X.509", BouncyCastleProvider.PROVIDER_NAME);
++        return cf.generateCertPath(is, "PKCS7");
++    }
++
++    public static CertPath getCertificateChain(List<X509Certificate> certs) throws CertificateException,
++        NoSuchProviderException {
++        CertificateFactory cf = CertificateFactory.getInstance("X.509", BouncyCastleProvider.PROVIDER_NAME);
++        return cf.generateCertPath(certs);
++    }
++
++    public static X509Certificate getX509CertificateFromPfx(byte[] pfxDER, String passwd) throws Exception {
++        InputDecryptorProvider inputDecryptorProvider = new JcePKCSPBEInputDecryptorProviderBuilder()
++            .setProvider(BouncyCastleProvider.PROVIDER_NAME).build(passwd.toCharArray());
++        PKCS12PfxPdu pfx = new PKCS12PfxPdu(pfxDER);
++
++        ContentInfo[] infos = pfx.getContentInfos();
++        if (infos.length != 2) {
++            throw new Exception("Only support one pair ContentInfo");
++        }
++
++        for (int i = 0; i != infos.length; i++) {
++            if (infos[i].getContentType().equals(PKCSObjectIdentifiers.encryptedData)) {
++                PKCS12SafeBagFactory dataFact = new PKCS12SafeBagFactory(infos[i], inputDecryptorProvider);
++                PKCS12SafeBag[] bags = dataFact.getSafeBags();
++                X509CertificateHolder certHoler = (X509CertificateHolder) bags[0].getBagValue();
++                return SM2CertUtil.getX509Certificate(certHoler.getEncoded());
++            }
++        }
++
++        throw new Exception("Not found X509Certificate in this pfx");
++    }
++
++    public static BCECPublicKey getPublicKeyFromPfx(byte[] pfxDER, String passwd) throws Exception {
++        return SM2CertUtil.getBCECPublicKey(getX509CertificateFromPfx(pfxDER, passwd));
++    }
++
++    public static BCECPrivateKey getPrivateKeyFromPfx(byte[] pfxDER, String passwd) throws Exception {
++        InputDecryptorProvider inputDecryptorProvider = new JcePKCSPBEInputDecryptorProviderBuilder()
++            .setProvider(BouncyCastleProvider.PROVIDER_NAME).build(passwd.toCharArray());
++        PKCS12PfxPdu pfx = new PKCS12PfxPdu(pfxDER);
++
++        ContentInfo[] infos = pfx.getContentInfos();
++        if (infos.length != 2) {
++            throw new Exception("Only support one pair ContentInfo");
++        }
++
++        for (int i = 0; i != infos.length; i++) {
++            if (!infos[i].getContentType().equals(PKCSObjectIdentifiers.encryptedData)) {
++                PKCS12SafeBagFactory dataFact = new PKCS12SafeBagFactory(infos[i]);
++                PKCS12SafeBag[] bags = dataFact.getSafeBags();
++                PKCS8EncryptedPrivateKeyInfo encInfo = (PKCS8EncryptedPrivateKeyInfo) bags[0].getBagValue();
++                PrivateKeyInfo info = encInfo.decryptPrivateKeyInfo(inputDecryptorProvider);
++                BCECPrivateKey privateKey = BCECUtil.convertPKCS8ToECPrivateKey(info.getEncoded());
++                return privateKey;
++            }
++        }
++
++        throw new Exception("Not found Private Key in this pfx");
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PfxMaker.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PfxMaker.java
+new file mode 100644
+index 0000000..86a2841
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PfxMaker.java
+@@ -0,0 +1,117 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert;
++
++import org.bouncycastle.asn1.DERBMPString;
++import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
++import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
++import org.bouncycastle.crypto.engines.DESedeEngine;
++import org.bouncycastle.crypto.engines.RC2Engine;
++import org.bouncycastle.crypto.modes.CBCBlockCipher;
++import org.bouncycastle.pkcs.PKCS12PfxPdu;
++import org.bouncycastle.pkcs.PKCS12PfxPduBuilder;
++import org.bouncycastle.pkcs.PKCS12SafeBag;
++import org.bouncycastle.pkcs.PKCS12SafeBagBuilder;
++import org.bouncycastle.pkcs.PKCSException;
++import org.bouncycastle.pkcs.bc.BcPKCS12MacCalculatorBuilder;
++import org.bouncycastle.pkcs.bc.BcPKCS12PBEOutputEncryptorBuilder;
++import org.bouncycastle.pkcs.jcajce.JcaPKCS12SafeBagBuilder;
++
++import java.io.IOException;
++import java.security.NoSuchAlgorithmException;
++import java.security.PrivateKey;
++import java.security.PublicKey;
++import java.security.cert.X509Certificate;
++
++public class SM2PfxMaker {
++
++    /**
++     * @param privKey 用户私钥
++     * @param pubKey  用户公钥
++     * @param chain   X509证书数组，切记这里固定了必须是3个元素的数组，且第一个必须是叶子证书、第二个为中级CA证书、第三个为根CA证书
++     * @param passwd  口令
++     * @return
++     * @throws NoSuchAlgorithmException
++     * @throws IOException
++     * @throws PKCSException
++     */
++    public PKCS12PfxPdu makePfx(PrivateKey privKey, PublicKey pubKey, X509Certificate[] chain, String passwd)
++        throws NoSuchAlgorithmException, IOException, PKCSException {
++        JcaX509ExtensionUtils extUtils = new JcaX509ExtensionUtils();
++
++        PKCS12SafeBagBuilder taCertBagBuilder = new JcaPKCS12SafeBagBuilder(chain[2]);
++        taCertBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_friendlyName,
++            new DERBMPString("Primary Certificate"));
++
++        PKCS12SafeBagBuilder caCertBagBuilder = new JcaPKCS12SafeBagBuilder(chain[1]);
++        caCertBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_friendlyName,
++            new DERBMPString("Intermediate Certificate"));
++
++        PKCS12SafeBagBuilder eeCertBagBuilder = new JcaPKCS12SafeBagBuilder(chain[0]);
++        eeCertBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_friendlyName,
++            new DERBMPString("User Key"));
++        eeCertBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_localKeyId,
++            extUtils.createSubjectKeyIdentifier(pubKey));
++
++        char[] passwdChars = passwd.toCharArray();
++        PKCS12SafeBagBuilder keyBagBuilder = new JcaPKCS12SafeBagBuilder(privKey,
++            new BcPKCS12PBEOutputEncryptorBuilder(
++                PKCSObjectIdentifiers.pbeWithSHAAnd3_KeyTripleDES_CBC,
++                new CBCBlockCipher(new DESedeEngine())).build(passwdChars));
++        keyBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_friendlyName,
++            new DERBMPString("User Key"));
++        keyBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_localKeyId,
++            extUtils.createSubjectKeyIdentifier(pubKey));
++
++        PKCS12PfxPduBuilder pfxPduBuilder = new PKCS12PfxPduBuilder();
++        PKCS12SafeBag[] certs = new PKCS12SafeBag[3];
++        certs[0] = eeCertBagBuilder.build();
++        certs[1] = caCertBagBuilder.build();
++        certs[2] = taCertBagBuilder.build();
++        pfxPduBuilder.addEncryptedData(new BcPKCS12PBEOutputEncryptorBuilder(
++                PKCSObjectIdentifiers.pbeWithSHAAnd40BitRC2_CBC,
++                new CBCBlockCipher(new RC2Engine())).build(passwdChars),
++            certs);
++        pfxPduBuilder.addData(keyBagBuilder.build());
++        return pfxPduBuilder.build(new BcPKCS12MacCalculatorBuilder(), passwdChars);
++    }
++
++    /**
++     * @param privKey 用户私钥
++     * @param pubKey  用户公钥
++     * @param cert    X509证书
++     * @param passwd  口令
++     * @return
++     * @throws NoSuchAlgorithmException
++     * @throws IOException
++     * @throws PKCSException
++     */
++    public PKCS12PfxPdu makePfx(PrivateKey privKey, PublicKey pubKey, X509Certificate cert, String passwd)
++        throws NoSuchAlgorithmException, IOException, PKCSException {
++        JcaX509ExtensionUtils extUtils = new JcaX509ExtensionUtils();
++
++        PKCS12SafeBagBuilder eeCertBagBuilder = new JcaPKCS12SafeBagBuilder(cert);
++        eeCertBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_friendlyName,
++            new DERBMPString("User Key"));
++        eeCertBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_localKeyId,
++            extUtils.createSubjectKeyIdentifier(pubKey));
++
++        char[] passwdChars = passwd.toCharArray();
++        PKCS12SafeBagBuilder keyBagBuilder = new JcaPKCS12SafeBagBuilder(privKey,
++            new BcPKCS12PBEOutputEncryptorBuilder(
++                PKCSObjectIdentifiers.pbeWithSHAAnd3_KeyTripleDES_CBC,
++                new CBCBlockCipher(new DESedeEngine())).build(passwdChars));
++        keyBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_friendlyName,
++            new DERBMPString("User Key"));
++        keyBagBuilder.addBagAttribute(PKCSObjectIdentifiers.pkcs_9_at_localKeyId,
++            extUtils.createSubjectKeyIdentifier(pubKey));
++
++        PKCS12PfxPduBuilder pfxPduBuilder = new PKCS12PfxPduBuilder();
++        PKCS12SafeBag[] certs = new PKCS12SafeBag[1];
++        certs[0] = eeCertBagBuilder.build();
++        pfxPduBuilder.addEncryptedData(new BcPKCS12PBEOutputEncryptorBuilder(
++                PKCSObjectIdentifiers.pbeWithSHAAnd40BitRC2_CBC,
++                new CBCBlockCipher(new RC2Engine())).build(passwdChars),
++            certs);
++        pfxPduBuilder.addData(keyBagBuilder.build());
++        return pfxPduBuilder.build(new BcPKCS12MacCalculatorBuilder(), passwdChars);
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PrivateKey.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PrivateKey.java
+new file mode 100644
+index 0000000..2da8c57
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PrivateKey.java
+@@ -0,0 +1,81 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert;
++
++import org.bouncycastle.asn1.ASN1Encodable;
++import org.bouncycastle.asn1.ASN1Encoding;
++import org.bouncycastle.asn1.ASN1Primitive;
++import org.bouncycastle.asn1.DERBitString;
++import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
++import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
++import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
++import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPrivateKey;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey;
++import org.bouncycastle.jcajce.provider.asymmetric.util.ECUtil;
++import org.bouncycastle.jcajce.provider.config.ProviderConfiguration;
++import org.bouncycastle.jce.provider.BouncyCastleProvider;
++
++import java.io.IOException;
++import java.security.spec.ECParameterSpec;
++
++public class SM2PrivateKey extends BCECPrivateKey {
++    private transient DERBitString sm2PublicKey;
++    private boolean withCompression;
++
++    public SM2PrivateKey(BCECPrivateKey privateKey, BCECPublicKey publicKey) {
++        super(privateKey.getAlgorithm(), privateKey);
++        this.sm2PublicKey = getSM2PublicKeyDetails(new SM2PublicKey(publicKey.getAlgorithm(), publicKey));
++        this.withCompression = false;
++    }
++
++    @Override
++    public void setPointFormat(String style) {
++        withCompression = !("UNCOMPRESSED".equalsIgnoreCase(style));
++    }
++
++    /**
++     * Return a PKCS8 representation of the key. The sequence returned
++     * represents a full PrivateKeyInfo object.
++     *
++     * @return a PKCS8 representation of the key.
++     */
++    @Override
++    public byte[] getEncoded() {
++        ECParameterSpec ecSpec = getParams();
++        ProviderConfiguration configuration = BouncyCastleProvider.CONFIGURATION;
++        ASN1Encodable params = SM2PublicKey.ID_SM2_PUBKEY_PARAM;
++
++        int orderBitLength;
++        if (ecSpec == null) {
++            orderBitLength = ECUtil.getOrderBitLength(configuration, null, this.getS());
++        } else {
++            orderBitLength = ECUtil.getOrderBitLength(configuration, ecSpec.getOrder(), this.getS());
++        }
++
++        PrivateKeyInfo info;
++        org.bouncycastle.asn1.sec.ECPrivateKey keyStructure;
++
++        if (sm2PublicKey != null) {
++            keyStructure = new org.bouncycastle.asn1.sec.ECPrivateKey(orderBitLength, this.getS(), sm2PublicKey, params);
++        } else {
++            keyStructure = new org.bouncycastle.asn1.sec.ECPrivateKey(orderBitLength, this.getS(), params);
++        }
++
++        try {
++            info = new PrivateKeyInfo(new AlgorithmIdentifier(X9ObjectIdentifiers.id_ecPublicKey, params), keyStructure);
++
++            return info.getEncoded(ASN1Encoding.DER);
++        } catch (IOException e) {
++            return null;
++        }
++    }
++
++    private DERBitString getSM2PublicKeyDetails(SM2PublicKey pub) {
++        try {
++            SubjectPublicKeyInfo info = SubjectPublicKeyInfo.getInstance(ASN1Primitive.fromByteArray(pub.getEncoded()));
++
++            return info.getPublicKeyData();
++        } catch (IOException e) {   // should never happen
++            return null;
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PublicKey.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PublicKey.java
+new file mode 100644
+index 0000000..158e077
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2PublicKey.java
+@@ -0,0 +1,44 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert;
++
++import org.bouncycastle.asn1.ASN1ObjectIdentifier;
++import org.bouncycastle.asn1.ASN1OctetString;
++import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
++import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
++import org.bouncycastle.asn1.x9.X9ECPoint;
++import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
++import org.bouncycastle.jcajce.provider.asymmetric.ec.BCECPublicKey;
++import org.bouncycastle.jcajce.provider.asymmetric.util.KeyUtil;
++
++public class SM2PublicKey extends BCECPublicKey {
++    public static final ASN1ObjectIdentifier ID_SM2_PUBKEY_PARAM = new ASN1ObjectIdentifier("1.2.156.10197.1.301");
++
++    private boolean withCompression;
++
++    public SM2PublicKey(BCECPublicKey key) {
++        super(key.getAlgorithm(), key);
++        this.withCompression = false;
++    }
++
++    public SM2PublicKey(String algorithm, BCECPublicKey key) {
++        super(algorithm, key);
++        this.withCompression = false;
++    }
++
++    @Override
++    public byte[] getEncoded() {
++        ASN1OctetString p = ASN1OctetString.getInstance(
++            new X9ECPoint(getQ(), withCompression).toASN1Primitive());
++
++        // stored curve is null if ImplicitlyCa
++        SubjectPublicKeyInfo info = new SubjectPublicKeyInfo(
++            new AlgorithmIdentifier(X9ObjectIdentifiers.id_ecPublicKey, ID_SM2_PUBKEY_PARAM),
++            p.getOctets());
++
++        return KeyUtil.getEncodedSubjectPublicKeyInfo(info);
++    }
++
++    @Override
++    public void setPointFormat(String style) {
++        withCompression = !("UNCOMPRESSED".equalsIgnoreCase(style));
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2X509CertMaker.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2X509CertMaker.java
+new file mode 100644
+index 0000000..ed91cf0
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/SM2X509CertMaker.java
+@@ -0,0 +1,89 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert;
++
++import org.bouncycastle.asn1.x500.X500Name;
++import org.bouncycastle.asn1.x509.BasicConstraints;
++import org.bouncycastle.asn1.x509.Extension;
++import org.bouncycastle.asn1.x509.KeyUsage;
++import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
++import org.bouncycastle.cert.X509v3CertificateBuilder;
++import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
++import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
++import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
++import org.bouncycastle.jce.provider.BouncyCastleProvider;
++import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
++import org.bouncycastle.pkcs.PKCS10CertificationRequest;
++import org.hyperledger.fabric.sdk.security.gmhelper.BCECUtil;
++
++import java.security.KeyPair;
++import java.security.PrivateKey;
++import java.security.PublicKey;
++import java.security.cert.X509Certificate;
++import java.util.Date;
++
++public class SM2X509CertMaker {
++    public static final String SIGN_ALGO_SM3WITHSM2 = "SM3withSM2";
++
++    private long certExpire;
++    private X500Name issuerDN;
++    private CertSNAllocator snAllocator;
++    private KeyPair issuerKeyPair;
++
++    /**
++     * @param issuerKeyPair 证书颁发者的密钥对。
++     *                      其实一般的CA的私钥都是要严格保护的。
++     *                      一般CA的私钥都会放在加密卡/加密机里，证书的签名由加密卡/加密机完成。
++     *                      这里仅是为了演示BC库签发证书的用法，所以暂时不作太多要求。
++     * @param certExpire    证书有效时间，单位毫秒
++     * @param issuer        证书颁发者信息
++     * @param snAllocator   维护/分配证书序列号的实例，证书序列号应该递增且不重复
++     */
++    public SM2X509CertMaker(KeyPair issuerKeyPair, long certExpire, X500Name issuer, CertSNAllocator snAllocator) {
++        this.issuerKeyPair = issuerKeyPair;
++        this.certExpire = certExpire;
++        this.issuerDN = issuer;
++        this.snAllocator = snAllocator;
++    }
++
++    /**
++     * @param isCA     是否是颁发给CA的证书
++     * @param keyUsage 证书用途
++     * @param csr      CSR
++     * @return
++     * @throws Exception
++     */
++    public X509Certificate makeCertificate(boolean isCA, KeyUsage keyUsage, byte[] csr)
++        throws Exception {
++        PKCS10CertificationRequest request = new PKCS10CertificationRequest(csr);
++        PublicKey subPub = BCECUtil.createPublicKeyFromSubjectPublicKeyInfo(request.getSubjectPublicKeyInfo());
++        PrivateKey issPriv = issuerKeyPair.getPrivate();
++        PublicKey issPub = issuerKeyPair.getPublic();
++
++        JcaX509ExtensionUtils extUtils = new JcaX509ExtensionUtils();
++        X509v3CertificateBuilder v3CertGen = new JcaX509v3CertificateBuilder(issuerDN, snAllocator.incrementAndGet(),
++            new Date(System.currentTimeMillis()), new Date(System.currentTimeMillis() + certExpire),
++            request.getSubject(), subPub);
++        v3CertGen.addExtension(Extension.subjectKeyIdentifier, false,
++            extUtils.createSubjectKeyIdentifier(SubjectPublicKeyInfo.getInstance(subPub.getEncoded())));
++        v3CertGen.addExtension(Extension.authorityKeyIdentifier, false,
++            extUtils.createAuthorityKeyIdentifier(SubjectPublicKeyInfo.getInstance(issPub.getEncoded())));
++        v3CertGen.addExtension(Extension.basicConstraints, false, new BasicConstraints(isCA));
++        v3CertGen.addExtension(Extension.keyUsage, false, keyUsage);
++
++        JcaContentSignerBuilder contentSignerBuilder = makeContentSignerBuilder(issPub);
++        X509Certificate cert = new JcaX509CertificateConverter().setProvider(BouncyCastleProvider.PROVIDER_NAME)
++            .getCertificate(v3CertGen.build(contentSignerBuilder.build(issPriv)));
++        cert.checkValidity(new Date());
++        cert.verify(issPub);
++
++        return cert;
++    }
++
++    private JcaContentSignerBuilder makeContentSignerBuilder(PublicKey issPub) throws Exception {
++        if (issPub.getAlgorithm().equals("EC")) {
++            JcaContentSignerBuilder contentSignerBuilder = new JcaContentSignerBuilder(SIGN_ALGO_SM3WITHSM2);
++            contentSignerBuilder.setProvider(BouncyCastleProvider.PROVIDER_NAME);
++            return contentSignerBuilder;
++        }
++        throw new Exception("Unsupported PublicKey Algorithm:" + issPub.getAlgorithm());
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/exception/InvalidX500NameException.java b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/exception/InvalidX500NameException.java
+new file mode 100644
+index 0000000..efed67a
+--- /dev/null
++++ b/src/main/java/org/hyperledger/fabric/sdk/security/gmhelper/cert/exception/InvalidX500NameException.java
+@@ -0,0 +1,21 @@
++package org.hyperledger.fabric.sdk.security.gmhelper.cert.exception;
++
++public class InvalidX500NameException extends Exception {
++    private static final long serialVersionUID = 3192247087539921768L;
++
++    public InvalidX500NameException() {
++        super();
++    }
++
++    public InvalidX500NameException(String message) {
++        super(message);
++    }
++
++    public InvalidX500NameException(String message, Throwable cause) {
++        super(message, cause);
++    }
++
++    public InvalidX500NameException(Throwable cause) {
++        super(cause);
++    }
++}
+diff --git a/src/main/resources/sn.dat b/src/main/resources/sn.dat
+new file mode 100644
+index 0000000..56a6051
+--- /dev/null
++++ b/src/main/resources/sn.dat
+@@ -0,0 +1 @@
++1
+\ No newline at end of file
+-- 
+2.7.4
+
